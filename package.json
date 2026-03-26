@@ -1,13 +1,9 @@
 {
-  "name": "@y/websocket-server",
+  "name": "y-multiplex-websocket-server",
   "version": "0.1.5",
-  "description": "Backend for y-websocket",
+  "description": "multiplex y-websocket",
   "type": "module",
   "sideEffects": false,
-  "funding": {
-    "type": "GitHub Sponsors ❤",
-    "url": "https://github.com/sponsors/dmonad"
-  },
   "scripts": {
     "start": "node ./src/server.js",
     "dist": "rm -rf dist && rollup -c && tsc",
@@ -50,17 +46,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yjs/y-websocket-server.git"
+    "url": "git+https://github.com/CyrusNG/y-multiplex-websocket-server.git"
   },
   "keywords": [
     "Yjs"
   ],
-  "author": "Kevin Jahns <kevin.jahns@protonmail.com>",
+  "author": "Cyrus NG <wu.cyrus@gmail.com>",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/yjs/y-websocket-server/issues"
+    "url": "https://github.com/CyrusNG/y-multiplex-websocket-server/issues"
   },
-  "homepage": "https://github.com/yjs/y-websocket-server#readme",
+  "homepage": "https://github.com/CyrusNG/y-multiplex-websocket-server#readme",
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org"
+  },
   "standard": {
     "ignore": [
       "/dist",
