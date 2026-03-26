@@ -49,7 +49,9 @@ export const docs = new Map()
 
 const messageSync = 0
 const messageAwareness = 1
-// const messageAuth = 2
+const messageRoute = 2
+const messageRouteClose = 3
+// const messageAuth = 4
 
 /**
  * @param {Uint8Array} update
@@ -224,57 +226,163 @@ const send = (doc, conn, m) => {
 const pingTimeout = 30000
 
 /**
- * @param {import('ws').WebSocket} conn
- * @param {import('http').IncomingMessage} req
- * @param {any} opts
+ * @param {string} docName
+ * @param {Uint8Array} message
  */
-export const setupWSConnection = (conn, req, { docName = (req.url || '').slice(1).split('?')[0], gc = true } = {}) => {
-  conn.binaryType = 'arraybuffer'
-  // get doc, initialize if it does not exist yet
-  const doc = getYDoc(docName, gc)
-  doc.conns.set(conn, new Set())
-  // listen and reply to events
-  conn.on('message', /** @param {ArrayBuffer} message */ message => messageListener(conn, doc, new Uint8Array(message)))
+const encodeRouteMessage = (docName, message) => {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, messageRoute)
+  encoding.writeVarString(encoder, docName)
+  encoding.writeVarUint8Array(encoder, message)
+  return encoding.toUint8Array(encoder)
+}
 
-  // Check if connection is still alive
-  let pongReceived = true
-  const pingInterval = setInterval(() => {
-    if (!pongReceived) {
-      if (doc.conns.has(conn)) {
-        closeConn(doc, conn)
-      }
-      clearInterval(pingInterval)
-    } else if (doc.conns.has(conn)) {
-      pongReceived = false
-      try {
-        conn.ping()
-      } catch (e) {
-        closeConn(doc, conn)
-        clearInterval(pingInterval)
-      }
-    }
-  }, pingTimeout)
-  conn.on('close', () => {
-    closeConn(doc, conn)
-    clearInterval(pingInterval)
-  })
-  conn.on('pong', () => {
-    pongReceived = true
-  })
-  // put the following in a variables in a block so the interval handlers don't keep in in
-  // scope
+/**
+ * @param {WSSharedDoc} doc
+ * @param {any} conn
+ */
+const initializeConnection = (doc, conn) => {
+  doc.conns.set(conn, new Set())
   {
-    // send sync step 1
     const encoder = encoding.createEncoder()
     encoding.writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, doc)
     send(doc, conn, encoding.toUint8Array(encoder))
     const awarenessStates = doc.awareness.getStates()
     if (awarenessStates.size > 0) {
-      const encoder = encoding.createEncoder()
-      encoding.writeVarUint(encoder, messageAwareness)
-      encoding.writeVarUint8Array(encoder, awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(awarenessStates.keys())))
-      send(doc, conn, encoding.toUint8Array(encoder))
+      const awarenessEncoder = encoding.createEncoder()
+      encoding.writeVarUint(awarenessEncoder, messageAwareness)
+      encoding.writeVarUint8Array(
+        awarenessEncoder,
+        awarenessProtocol.encodeAwarenessUpdate(doc.awareness, Array.from(awarenessStates.keys()))
+      )
+      send(doc, conn, encoding.toUint8Array(awarenessEncoder))
     }
   }
+}
+
+/**
+ * @param {import('ws').WebSocket} conn
+ */
+const setupHeartbeat = conn => {
+  let pongReceived = true
+  const pingInterval = setInterval(() => {
+    if (!pongReceived) {
+      try {
+        conn.close()
+      } catch (e) {
+        // ignore close errors
+      }
+      clearInterval(pingInterval)
+    } else if (conn.readyState === wsReadyStateConnecting || conn.readyState === wsReadyStateOpen) {
+      pongReceived = false
+      try {
+        conn.ping()
+      } catch (e) {
+        try {
+          conn.close()
+        } catch (closeError) {
+          // ignore close errors
+        }
+        clearInterval(pingInterval)
+      }
+    } else {
+      clearInterval(pingInterval)
+    }
+  }, pingTimeout)
+
+  conn.on('close', () => {
+    clearInterval(pingInterval)
+  })
+  conn.on('pong', () => {
+    pongReceived = true
+  })
+}
+
+/**
+ * @param {import('ws').WebSocket} conn
+ * @param {boolean} gc
+ */
+const setupMultiplexConnection = (conn, gc) => {
+  /**
+   * @type {Map<string, { doc: WSSharedDoc, routeConn: any }>}
+   */
+  const routeConns = new Map()
+
+  /**
+   * @param {string} docName
+   */
+  const getOrCreateRouteConn = docName => {
+    const current = routeConns.get(docName)
+    if (current !== undefined) {
+      return current
+    }
+    const doc = getYDoc(docName, gc)
+    const routeConn = {
+      get readyState () {
+        return conn.readyState
+      },
+      send: (
+        /** @type {Uint8Array} */ message,
+        /** @type {any} */ options,
+        /** @type {(err?: Error | null) => void} */ callback
+      ) => conn.send(encodeRouteMessage(docName, message), options, callback),
+      close: () => {
+        closeRouteConn(docName)
+      }
+    }
+    initializeConnection(doc, routeConn)
+    const routeState = { doc, routeConn }
+    routeConns.set(docName, routeState)
+    return routeState
+  }
+
+  /**
+   * @param {string} docName
+   */
+  const closeRouteConn = docName => {
+    const routeState = routeConns.get(docName)
+    if (routeState !== undefined) {
+      routeConns.delete(docName)
+      closeConn(routeState.doc, routeState.routeConn)
+    }
+  }
+
+  conn.on('message', /** @param {ArrayBuffer} message */ message => {
+    try {
+      const decoder = decoding.createDecoder(new Uint8Array(message))
+      const messageType = decoding.readVarUint(decoder)
+      if (messageType === messageRouteClose) {
+        closeRouteConn(decoding.readVarString(decoder))
+        return
+      }
+      if (messageType !== messageRoute) {
+        return
+      }
+      const docName = decoding.readVarString(decoder)
+      const routedMessage = decoding.readVarUint8Array(decoder)
+      const routeState = getOrCreateRouteConn(docName)
+      messageListener(routeState.routeConn, routeState.doc, routedMessage)
+    } catch (err) {
+      console.error(err)
+    }
+  })
+
+  conn.on('close', () => {
+    routeConns.forEach(({ doc, routeConn }) => {
+      closeConn(doc, routeConn)
+    })
+    routeConns.clear()
+  })
+}
+
+/**
+ * @param {import('ws').WebSocket} conn
+ * @param {import('http').IncomingMessage} req
+ * @param {any} opts
+ */
+export const setupWSConnection = (conn, req, { gc = true } = {}) => {
+  conn.binaryType = 'arraybuffer'
+  setupHeartbeat(conn)
+  setupMultiplexConnection(conn, gc)
 }

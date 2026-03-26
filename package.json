@@ -12,7 +12,7 @@
     "start": "node ./src/server.js",
     "dist": "rm -rf dist && rollup -c && tsc",
     "lint": "standard && tsc",
-    "test": "npm run lint",
+    "test": "npm run lint && node --test --test-force-exit test",
     "preversion": "npm run lint && npm run dist && test -e dist/src/server.d.ts && test -e dist/server.cjs"
   },
   "bin": {
@@ -34,6 +34,12 @@
       "require": "./dist/utils.cjs",
       "types": "./dist/src/utils.d.ts",
       "default": "./src/utils.js"
+    },
+    "./provider": {
+      "import": "./src/provider.js",
+      "require": "./dist/provider.cjs",
+      "types": "./dist/src/provider.d.ts",
+      "default": "./src/provider.js"
     },
     "./callback": {
       "import": "./src/callback.js",

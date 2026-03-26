@@ -25,19 +25,66 @@ Start a y-websocket server:
 HOST=localhost PORT=1234 npx y-websocket
 ```
 
-### Client Code:
+### Client Code
+
+Single routed doc:
 
 ```js
 import * as Y from 'yjs'
-import { WebsocketProvider } from 'y-websocket'
+import { MultiplexProvider } from '@y/websocket-server/provider'
 
 const doc = new Y.Doc()
-const wsProvider = new WebsocketProvider('ws://localhost:1234', 'my-roomname', doc)
 
-wsProvider.on('status', event => {
-  console.log(event.status) // logs "connected" or "disconnected"
+const multiplexProvider = new MultiplexProvider(
+  'ws://localhost:1234/connect/doc',
+  'ticket',
+  {
+    params: {
+      token: 'demo-token'
+    }
+  }
+)
+
+const binding = multiplexProvider.attach('my-roomname', doc)
+
+binding.on('status', event => {
+  console.log(event.status)
 })
 ```
+
+Multiple routed docs on one websocket:
+
+```js
+import * as Y from 'yjs'
+import { MultiplexProvider } from '@y/websocket-server/provider'
+
+const docA = new Y.Doc()
+const docB = new Y.Doc()
+
+const multiplexProvider = new MultiplexProvider(
+  'ws://localhost:1234/connect/doc',
+  'ticket'
+)
+
+const providerA = multiplexProvider.attach('room-a', docA)
+const providerB = multiplexProvider.attach('room-b', docB)
+
+providerA.on('status', event => {
+  console.log('room-a', event.status)
+})
+
+providerB.on('status', event => {
+  console.log('room-b', event.status)
+})
+
+multiplexProvider.detach('room-b')
+```
+
+`MultiplexProvider` is the only supported client protocol. It builds the final websocket URL from `serverUrl`, `roomName`, and `opts`, and automatically appends `multiplex=true` to the query string.
+
+Connection-level options such as `connect`, `params`, `protocols`, `WebSocketPolyfill`, and `maxBackoffTime` belong on `new MultiplexProvider(...)`.
+Doc-level options such as `awareness`, `connect`, `resyncInterval`, and `disableBc` belong on `attach(...)`.
+When `disableBc` is `false`, routed docs also sync across browser tabs using `BroadcastChannel` with a localStorage fallback from `lib0`.
 
 ## Websocket Server
 
@@ -48,6 +95,119 @@ HOST=localhost PORT=1234 npx y-websocket
 ```
 
 Since npm symlinks the `y-websocket` executable from your local `./node_modules/.bin` folder, you can simply run npx. The `PORT` environment variable already defaults to 1234, and `HOST` defaults to `localhost`.
+
+### Custom Server Code
+
+```js
+import http from 'http'
+import WebSocket from 'ws'
+import { setupWSConnection } from '@y/websocket-server/utils'
+
+const server = http.createServer((_request, response) => {
+  response.writeHead(200, { 'Content-Type': 'text/plain' })
+  response.end('okay')
+})
+
+const wss = new WebSocket.Server({ noServer: true })
+
+wss.on('connection', (ws, request) => {
+  setupWSConnection(ws, request)
+})
+
+server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, ws => {
+    wss.emit('connection', ws, request)
+  })
+})
+
+server.listen(1234)
+```
+
+The server always speaks the routed multiplex protocol. A single doc connection is simply a multiplex connection with one attached route.
+
+### Multiplex End-to-End Example
+
+Server:
+
+```js
+import http from 'http'
+import WebSocket from 'ws'
+import { setupWSConnection } from '@y/websocket-server/utils'
+
+const server = http.createServer((_request, response) => {
+  response.writeHead(200, { 'Content-Type': 'text/plain' })
+  response.end('okay')
+})
+
+const wss = new WebSocket.Server({ noServer: true })
+
+wss.on('connection', (ws, request) => {
+  setupWSConnection(ws, request)
+})
+
+server.on('upgrade', (request, socket, head) => {
+  wss.handleUpgrade(request, socket, head, ws => {
+    wss.emit('connection', ws, request)
+  })
+})
+
+server.listen(1234, () => {
+  console.log('server listening on ws://localhost:1234')
+})
+```
+
+Client:
+
+```js
+import * as Y from 'yjs'
+import { MultiplexProvider } from '@y/websocket-server/provider'
+
+const multiplexProvider = new MultiplexProvider(
+  'ws://localhost:1234/connect/doc',
+  'ticket',
+  {
+    params: {
+      token: 'demo-token'
+    }
+  }
+)
+
+const editorDoc = new Y.Doc()
+const commentDoc = new Y.Doc()
+
+const editorBinding = multiplexProvider.attach('page:1:editor', editorDoc)
+const commentBinding = multiplexProvider.attach('page:1:comments', commentDoc, {
+  resyncInterval: 5000,
+  disableBc: true
+})
+
+editorBinding.on('status', event => {
+  console.log('editor', event.status)
+})
+
+commentBinding.on('status', event => {
+  console.log('comments', event.status)
+})
+
+editorBinding.on('sync', isSynced => {
+  console.log('editor synced:', isSynced)
+})
+
+commentBinding.on('sync', isSynced => {
+  console.log('comments synced:', isSynced)
+})
+
+// Remove a single routed doc while keeping the shared socket alive
+// for the other attached docs.
+commentBinding.destroy()
+
+// Close the whole multiplex provider when no routed docs are needed.
+multiplexProvider.destroy()
+```
+
+In this example, `/connect/doc/ticket` remains available for application routing or authorization, while `page:1:editor` and `page:1:comments` are multiplex sub-routes that share one websocket connection and keep independent Y.Doc sync and awareness state.
+
+If you only need one doc, attach exactly one route and use it the same way.
 
 ### Websocket Server with Persistence
 
