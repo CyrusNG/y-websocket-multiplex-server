@@ -45,7 +45,9 @@ export const getPersistence = () => persistence
 /**
  * @type {Map<string,WSSharedDoc>}
  */
-export const docs = new Map()
+const docs = new Map()
+const connectionDocs = new Map()
+const docsBeingRemoved = new Set()
 
 const messageSync = 0
 const messageAwareness = 1
@@ -150,6 +152,70 @@ export const getYDoc = (docname, gc = true) => map.setIfUndefined(docs, docname,
 })
 
 /**
+ * @param {string} docName
+ * @return {WSSharedDoc | undefined}
+ */
+export const getDoc = docName => docs.get(docName)
+
+/**
+ * @param {import('ws').WebSocket} conn
+ * @return {Array<WSSharedDoc>}
+ */
+export const getDocsForConnection = conn => {
+  const routeConns = connectionDocs.get(conn)
+  return routeConns === undefined ? [] : Array.from(routeConns.values(), ({ doc }) => doc)
+}
+
+/**
+ * @param {string} docName
+ * @return {Array<any>}
+ */
+export const getConnectionsForDoc = docName => {
+  const doc = docs.get(docName)
+  return doc === undefined
+    ? []
+    : Array.from(new Set(Array.from(doc.conns.keys(), conn => conn.ws || conn)))
+}
+
+/**
+ * @param {WSSharedDoc} doc
+ */
+const cleanupDoc = doc => {
+  if (docsBeingRemoved.has(doc.name)) {
+    return
+  }
+  docsBeingRemoved.add(doc.name)
+  docs.delete(doc.name)
+  const cleanup = () => {
+    doc.destroy()
+    docsBeingRemoved.delete(doc.name)
+  }
+  if (persistence !== null) {
+    persistence.writeState(doc.name, doc).finally(cleanup)
+  } else {
+    cleanup()
+  }
+}
+
+/**
+ * @param {string} docName
+ */
+export const cleanDoc = docName => {
+  const doc = docs.get(docName)
+  if (doc === undefined) {
+    return false
+  }
+  if (doc.conns.size === 0) {
+    cleanupDoc(doc)
+    return true
+  }
+  Array.from(doc.conns.keys()).forEach(conn => {
+    closeConn(doc, conn)
+  })
+  return true
+}
+
+/**
  * @param {any} conn
  * @param {WSSharedDoc} doc
  * @param {Uint8Array} message
@@ -196,12 +262,8 @@ const closeConn = (doc, conn) => {
     const controlledIds = doc.conns.get(conn)
     doc.conns.delete(conn)
     awarenessProtocol.removeAwarenessStates(doc.awareness, Array.from(controlledIds), null)
-    if (doc.conns.size === 0 && persistence !== null) {
-      // if persisted, we store state and destroy ydocument
-      persistence.writeState(doc.name, doc).then(() => {
-        doc.destroy()
-      })
-      docs.delete(doc.name)
+    if (doc.conns.size === 0) {
+      cleanupDoc(doc)
     }
   }
   conn.close()
@@ -308,6 +370,7 @@ const setupMultiplexConnection = (conn, gc) => {
    * @type {Map<string, { doc: WSSharedDoc, routeConn: any }>}
    */
   const routeConns = new Map()
+  connectionDocs.set(conn, routeConns)
 
   /**
    * @param {string} docName
@@ -319,6 +382,7 @@ const setupMultiplexConnection = (conn, gc) => {
     }
     const doc = getYDoc(docName, gc)
     const routeConn = {
+      ws: conn,
       get readyState () {
         return conn.readyState
       },
@@ -373,6 +437,7 @@ const setupMultiplexConnection = (conn, gc) => {
       closeConn(doc, routeConn)
     })
     routeConns.clear()
+    connectionDocs.delete(conn)
   })
 }
 

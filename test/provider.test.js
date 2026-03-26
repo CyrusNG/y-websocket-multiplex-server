@@ -2,7 +2,13 @@ import test from 'node:test'
 import http from 'http'
 import WebSocket from 'ws'
 import * as Y from 'yjs'
-import { setupWSConnection } from '../src/utils.js'
+import {
+  cleanDoc,
+  getDoc,
+  getConnectionsForDoc,
+  getDocsForConnection,
+  setupWSConnection
+} from '../src/utils.js'
 import { MultiplexProvider } from '../src/provider.js'
 
 /**
@@ -53,6 +59,7 @@ const createTestServer = async () => {
   return {
     url: `ws://127.0.0.1:${address.port}`,
     getConnectionCount: () => connectionCount,
+    getFirstSocket: () => sockets.values().next().value,
     close: async () => {
       sockets.forEach(socket => {
         socket.terminate()
@@ -190,4 +197,57 @@ test('syncs routed docs across providers through BroadcastChannel when enabled',
 
   await destroyProvider(providerA)
   await destroyProvider(providerB)
+})
+
+test('exposes routed docs for a websocket connection and removes docs manually', async () => {
+  const testServer = await createTestServer()
+
+  const provider = new MultiplexProvider(testServer.url, 'ticket', { WebSocketPolyfill: WebSocket })
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+
+  const bindingA = provider.attach('doc-a', docA, { disableBc: true })
+  const bindingB = provider.attach('doc-b', docB, { disableBc: true })
+
+  await waitFor(() => bindingA.synced && bindingB.synced, 'Bindings never synced')
+
+  const ws = testServer.getFirstSocket()
+  await waitFor(() => ws !== undefined, 'Server websocket was never created')
+  await waitFor(() => getDocsForConnection(ws).length === 2, 'Server never exposed both routed docs for the websocket')
+  await waitFor(() => getConnectionsForDoc('doc-a').length === 1, 'Server never exposed the websocket for doc-a')
+
+  const docNames = getDocsForConnection(ws).map(doc => doc.name).sort()
+  if (docNames.join(',') !== 'doc-a,doc-b') {
+    throw new Error(`Unexpected routed doc names: ${docNames.join(',')}`)
+  }
+
+  if (getConnectionsForDoc('doc-a')[0] !== ws) {
+    throw new Error('getConnectionsForDoc did not return the expected websocket')
+  }
+
+  if (!cleanDoc('doc-b')) {
+    throw new Error('cleanDoc should return true for an existing doc')
+  }
+
+  await waitFor(() => getDoc('doc-b') === undefined, 'cleanDoc did not remove the doc from the server registry')
+  await waitFor(() => getDocsForConnection(ws).length === 1, 'cleanDoc did not detach the doc from the websocket')
+  await waitFor(() => getConnectionsForDoc('doc-b').length === 0, 'cleanDoc did not clear the doc connection registry')
+
+  await destroyProvider(provider)
+  await testServer.close()
+})
+
+test('automatically removes docs when the last connection closes', async () => {
+  const testServer = await createTestServer()
+
+  const provider = new MultiplexProvider(testServer.url, 'ticket', { WebSocketPolyfill: WebSocket })
+  const doc = new Y.Doc()
+  const binding = provider.attach('auto-cleanup-doc', doc, { disableBc: true })
+
+  await waitFor(() => binding.synced, 'Binding never synced')
+  await waitFor(() => getDoc('auto-cleanup-doc') !== undefined, 'Doc was never registered in the server registry')
+
+  await destroyProvider(provider)
+  await waitFor(() => getDoc('auto-cleanup-doc') === undefined, 'Doc was not removed after the last connection closed')
+  await testServer.close()
 })

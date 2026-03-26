@@ -86,6 +86,13 @@ Connection-level options such as `connect`, `params`, `protocols`, `WebSocketPol
 Doc-level options such as `awareness`, `connect`, `resyncInterval`, and `disableBc` belong on `attach(...)`.
 When `disableBc` is `false`, routed docs also sync across browser tabs using `BroadcastChannel` with a localStorage fallback from `lib0`.
 
+`roomName` and routed `docName` are different:
+
+- `roomName` belongs to `new MultiplexProvider(serverUrl, roomName, ...)` and is used to build the websocket URL
+- `docName` belongs to `attach(docName, doc, ...)` and is the key used by the server-side doc registry
+
+If you call `getDoc(docName)` on the server, use the same string that was passed as the first argument to `attach(...)`.
+
 ## Websocket Server
 
 Start a y-websocket server:
@@ -101,7 +108,13 @@ Since npm symlinks the `y-websocket` executable from your local `./node_modules/
 ```js
 import http from 'http'
 import WebSocket from 'ws'
-import { setupWSConnection } from '@y/websocket-server/utils'
+import {
+  cleanDoc,
+  getDoc,
+  getConnectionsForDoc,
+  getDocsForConnection,
+  setupWSConnection
+} from '@y/websocket-server/utils'
 
 const server = http.createServer((_request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -112,6 +125,15 @@ const wss = new WebSocket.Server({ noServer: true })
 
 wss.on('connection', (ws, request) => {
   setupWSConnection(ws, request)
+
+  // The current routed docs for this websocket connection.
+  console.log(getDocsForConnection(ws).map(doc => doc.name))
+
+  // Access a routed doc by the attach(docName, doc) key.
+  console.log(getDoc('my-roomname'))
+
+  // List the websocket connections currently attached to a routed doc.
+  console.log(getConnectionsForDoc('my-roomname'))
 })
 
 server.on('upgrade', (request, socket, head) => {
@@ -121,9 +143,13 @@ server.on('upgrade', (request, socket, head) => {
 })
 
 server.listen(1234)
+
+// Clean the current in-memory doc instance by its routed docName when needed.
+cleanDoc('my-roomname')
 ```
 
 The server always speaks the routed multiplex protocol. A single doc connection is simply a multiplex connection with one attached route.
+When the last connection for a doc closes, that doc is automatically destroyed and removed from the server-side doc registry.
 
 ### Multiplex End-to-End Example
 
