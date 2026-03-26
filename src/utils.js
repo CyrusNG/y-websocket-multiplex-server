@@ -56,6 +56,20 @@ const messageRouteClose = 3
 // const messageAuth = 4
 
 /**
+ * @param {string} namespace
+ * @param {string} docName
+ */
+const createDocKey = (namespace, docName) => `${namespace}:${docName}`
+
+/**
+ * @param {import('http').IncomingMessage} req
+ */
+const getRequestNamespace = req => {
+  const url = new URL(req.url || '/', 'http://localhost')
+  return url.pathname.replace(/^\/+|\/+$/g, '')
+}
+
+/**
  * @param {Uint8Array} update
  * @param {any} _origin
  * @param {WSSharedDoc} doc
@@ -87,10 +101,14 @@ export const setContentInitializor = (f) => {
 export class WSSharedDoc extends Y.Doc {
   /**
    * @param {string} name
+   * @param {string} namespace
+   * @param {string} docName
    */
-  constructor (name) {
+  constructor (name, namespace, docName) {
     super({ gc: gcEnabled })
     this.name = name
+    this.namespace = namespace
+    this.docName = docName
     /**
      * Maps from conn to set of controlled user ids. Delete all user ids from awareness when this conn is closed
      * @type {Map<Object, Set<number>>}
@@ -137,25 +155,27 @@ export class WSSharedDoc extends Y.Doc {
 /**
  * Gets a Y.Doc by name, whether in memory or on disk
  *
- * @param {string} docname - the name of the Y.Doc to find or create
+ * @param {string} namespace - the namespace of the Y.Doc
+ * @param {string} docname - the routed name of the Y.Doc to find or create
  * @param {boolean} gc - whether to allow gc on the doc (applies only when created)
  * @return {WSSharedDoc}
  */
-export const getYDoc = (docname, gc = true) => map.setIfUndefined(docs, docname, () => {
-  const doc = new WSSharedDoc(docname)
+export const getYDoc = (namespace, docname, gc = true) => map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
+  const doc = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
   doc.gc = gc
   if (persistence !== null) {
-    persistence.bindState(docname, doc)
+    persistence.bindState(doc.name, doc)
   }
-  docs.set(docname, doc)
+  docs.set(doc.name, doc)
   return doc
 })
 
 /**
+ * @param {string} namespace
  * @param {string} docName
  * @return {WSSharedDoc | undefined}
  */
-export const getDoc = docName => docs.get(docName)
+export const getDoc = (namespace, docName) => docs.get(createDocKey(namespace, docName))
 
 /**
  * @param {import('ws').WebSocket} conn
@@ -167,11 +187,12 @@ export const getDocsForConnection = conn => {
 }
 
 /**
+ * @param {string} namespace
  * @param {string} docName
  * @return {Array<any>}
  */
-export const getConnectionsForDoc = docName => {
-  const doc = docs.get(docName)
+export const getConnectionsForDoc = (namespace, docName) => {
+  const doc = docs.get(createDocKey(namespace, docName))
   return doc === undefined
     ? []
     : Array.from(new Set(Array.from(doc.conns.keys(), conn => conn.ws || conn)))
@@ -198,10 +219,11 @@ const cleanupDoc = doc => {
 }
 
 /**
+ * @param {string} namespace
  * @param {string} docName
  */
-export const cleanDoc = docName => {
-  const doc = docs.get(docName)
+export const cleanDoc = (namespace, docName) => {
+  const doc = docs.get(createDocKey(namespace, docName))
   if (doc === undefined) {
     return false
   }
@@ -363,9 +385,10 @@ const setupHeartbeat = conn => {
 
 /**
  * @param {import('ws').WebSocket} conn
+ * @param {string} namespace
  * @param {boolean} gc
  */
-const setupMultiplexConnection = (conn, gc) => {
+const setupMultiplexConnection = (conn, namespace, gc) => {
   /**
    * @type {Map<string, { doc: WSSharedDoc, routeConn: any }>}
    */
@@ -380,7 +403,7 @@ const setupMultiplexConnection = (conn, gc) => {
     if (current !== undefined) {
       return current
     }
-    const doc = getYDoc(docName, gc)
+    const doc = getYDoc(namespace, docName, gc)
     const routeConn = {
       ws: conn,
       get readyState () {
@@ -442,12 +465,14 @@ const setupMultiplexConnection = (conn, gc) => {
 }
 
 /**
+ * @param {string | undefined} namespace
  * @param {import('ws').WebSocket} conn
  * @param {import('http').IncomingMessage} req
- * @param {any} opts
+ * @param {{ gc?: boolean }} [opts]
  */
-export const setupWSConnection = (conn, req, { gc = true } = {}) => {
+export const setupWSConnection = (namespace, conn, req, opts = {}) => {
+  const { gc = true } = opts
   conn.binaryType = 'arraybuffer'
   setupHeartbeat(conn)
-  setupMultiplexConnection(conn, gc)
+  setupMultiplexConnection(conn, namespace || getRequestNamespace(req), gc)
 }

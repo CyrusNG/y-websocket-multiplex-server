@@ -14,7 +14,9 @@ const server = http.createServer((_request, response) => {
   response.end('okay')
 })
 
-wss.on('connection', setupWSConnection)
+wss.on('connection', (ws, request) => {
+  setupWSConnection(undefined, ws, request)
+})
 
 server.on('upgrade', (request, socket, head) => {
   // You may check auth of request here..

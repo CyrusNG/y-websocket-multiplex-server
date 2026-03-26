@@ -86,12 +86,13 @@ Connection-level options such as `connect`, `params`, `protocols`, `WebSocketPol
 Doc-level options such as `awareness`, `connect`, `resyncInterval`, and `disableBc` belong on `attach(...)`.
 When `disableBc` is `false`, routed docs also sync across browser tabs using `BroadcastChannel` with a localStorage fallback from `lib0`.
 
-`roomName` and routed `docName` are different:
+`roomName`, `namespace`, and routed `docName` are different:
 
 - `roomName` belongs to `new MultiplexProvider(serverUrl, roomName, ...)` and is used to build the websocket URL
-- `docName` belongs to `attach(docName, doc, ...)` and is the key used by the server-side doc registry
+- `namespace` belongs to `setupWSConnection(namespace, ws, req, ...)` and is the server-side isolation boundary
+- `docName` belongs to `attach(docName, doc, ...)` and is scoped inside that server-side namespace
 
-If you call `getDoc(docName)` on the server, use the same string that was passed as the first argument to `attach(...)`.
+If you call `getDoc(namespace, docName)` on the server, use the namespace passed to `setupWSConnection(...)` and the same `docName` string that was passed as the first argument to `attach(...)`.
 
 ## Websocket Server
 
@@ -124,16 +125,19 @@ const server = http.createServer((_request, response) => {
 const wss = new WebSocket.Server({ noServer: true })
 
 wss.on('connection', (ws, request) => {
-  setupWSConnection(ws, request)
+  setupWSConnection('ticket', ws, request)
 
   // The current routed docs for this websocket connection.
-  console.log(getDocsForConnection(ws).map(doc => doc.name))
+  console.log(getDocsForConnection(ws).map(doc => ({
+    namespace: doc.namespace,
+    docName: doc.docName
+  })))
 
-  // Access a routed doc by the attach(docName, doc) key.
-  console.log(getDoc('my-roomname'))
+  // Access a routed doc by namespace + attach(docName, doc).
+  console.log(getDoc('ticket', 'my-roomname'))
 
   // List the websocket connections currently attached to a routed doc.
-  console.log(getConnectionsForDoc('my-roomname'))
+  console.log(getConnectionsForDoc('ticket', 'my-roomname'))
 })
 
 server.on('upgrade', (request, socket, head) => {
@@ -144,8 +148,8 @@ server.on('upgrade', (request, socket, head) => {
 
 server.listen(1234)
 
-// Clean the current in-memory doc instance by its routed docName when needed.
-cleanDoc('my-roomname')
+// Clean the current in-memory doc instance by namespace + routed docName when needed.
+cleanDoc('ticket', 'my-roomname')
 ```
 
 The server always speaks the routed multiplex protocol. A single doc connection is simply a multiplex connection with one attached route.
@@ -168,7 +172,7 @@ const server = http.createServer((_request, response) => {
 const wss = new WebSocket.Server({ noServer: true })
 
 wss.on('connection', (ws, request) => {
-  setupWSConnection(ws, request)
+  setupWSConnection('ticket', ws, request)
 })
 
 server.on('upgrade', (request, socket, head) => {

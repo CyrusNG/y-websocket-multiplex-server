@@ -26,7 +26,10 @@ const waitFor = async (predicate, message, timeoutMs = 3000) => {
   }
 }
 
-const createTestServer = async () => {
+/**
+ * @param {string} namespace
+ */
+const createTestServer = async (namespace = 'ticket') => {
   let connectionCount = 0
   const sockets = new Set()
   const server = http.createServer((_request, response) => {
@@ -41,7 +44,7 @@ const createTestServer = async () => {
     ws.on('close', () => {
       sockets.delete(ws)
     })
-    setupWSConnection(ws, request)
+    setupWSConnection(namespace, ws, request)
   })
 
   server.on('upgrade', (request, socket, head) => {
@@ -117,6 +120,37 @@ test('syncs a single routed doc over MultiplexProvider', async () => {
   await destroyProvider(providerA)
   await destroyProvider(providerB)
   await testServer.close()
+})
+
+test('scopes the same docName by namespace', async () => {
+  const ticketServer = await createTestServer('ticket-a')
+  const releaseServer = await createTestServer('ticket-b')
+
+  const providerA = new MultiplexProvider(ticketServer.url, 'ticket-a', { WebSocketPolyfill: WebSocket })
+  const providerB = new MultiplexProvider(releaseServer.url, 'ticket-b', { WebSocketPolyfill: WebSocket })
+
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+
+  const bindingA = providerA.attach('version', docA, { disableBc: true })
+  const bindingB = providerB.attach('version', docB, { disableBc: true })
+
+  await waitFor(() => bindingA.synced && bindingB.synced, 'Room-scoped bindings never synced')
+  docA.getMap('data').set('value', 'ticket-a-value')
+
+  await new Promise(resolve => setTimeout(resolve, 100))
+  if (getValue(docB) !== undefined) {
+    throw new Error('The same docName leaked across rooms')
+  }
+
+  if (getDoc('ticket-a', 'version') === undefined || getDoc('ticket-b', 'version') === undefined) {
+    throw new Error('Room-scoped docs were not registered separately')
+  }
+
+  await destroyProvider(providerA)
+  await destroyProvider(providerB)
+  await ticketServer.close()
+  await releaseServer.close()
 })
 
 test('shares one websocket across multiple routed docs', async () => {
@@ -214,24 +248,24 @@ test('exposes routed docs for a websocket connection and removes docs manually',
   const ws = testServer.getFirstSocket()
   await waitFor(() => ws !== undefined, 'Server websocket was never created')
   await waitFor(() => getDocsForConnection(ws).length === 2, 'Server never exposed both routed docs for the websocket')
-  await waitFor(() => getConnectionsForDoc('doc-a').length === 1, 'Server never exposed the websocket for doc-a')
+  await waitFor(() => getConnectionsForDoc('ticket', 'doc-a').length === 1, 'Server never exposed the websocket for doc-a')
 
-  const docNames = getDocsForConnection(ws).map(doc => doc.name).sort()
+  const docNames = getDocsForConnection(ws).map(doc => doc.docName).sort()
   if (docNames.join(',') !== 'doc-a,doc-b') {
     throw new Error(`Unexpected routed doc names: ${docNames.join(',')}`)
   }
 
-  if (getConnectionsForDoc('doc-a')[0] !== ws) {
+  if (getConnectionsForDoc('ticket', 'doc-a')[0] !== ws) {
     throw new Error('getConnectionsForDoc did not return the expected websocket')
   }
 
-  if (!cleanDoc('doc-b')) {
+  if (!cleanDoc('ticket', 'doc-b')) {
     throw new Error('cleanDoc should return true for an existing doc')
   }
 
-  await waitFor(() => getDoc('doc-b') === undefined, 'cleanDoc did not remove the doc from the server registry')
+  await waitFor(() => getDoc('ticket', 'doc-b') === undefined, 'cleanDoc did not remove the doc from the server registry')
   await waitFor(() => getDocsForConnection(ws).length === 1, 'cleanDoc did not detach the doc from the websocket')
-  await waitFor(() => getConnectionsForDoc('doc-b').length === 0, 'cleanDoc did not clear the doc connection registry')
+  await waitFor(() => getConnectionsForDoc('ticket', 'doc-b').length === 0, 'cleanDoc did not clear the doc connection registry')
 
   await destroyProvider(provider)
   await testServer.close()
@@ -245,9 +279,9 @@ test('automatically removes docs when the last connection closes', async () => {
   const binding = provider.attach('auto-cleanup-doc', doc, { disableBc: true })
 
   await waitFor(() => binding.synced, 'Binding never synced')
-  await waitFor(() => getDoc('auto-cleanup-doc') !== undefined, 'Doc was never registered in the server registry')
+  await waitFor(() => getDoc('ticket', 'auto-cleanup-doc') !== undefined, 'Doc was never registered in the server registry')
 
   await destroyProvider(provider)
-  await waitFor(() => getDoc('auto-cleanup-doc') === undefined, 'Doc was not removed after the last connection closed')
+  await waitFor(() => getDoc('ticket', 'auto-cleanup-doc') === undefined, 'Doc was not removed after the last connection closed')
   await testServer.close()
 })
