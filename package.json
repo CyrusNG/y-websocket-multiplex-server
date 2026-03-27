@@ -67,17 +67,20 @@
     ]
   },
   "dependencies": {
-    "@y/protocols": "^1.0.6-1",
+    "@y/protocols": "1.0.6-1",
     "lib0": "^0.2.102",
-    "ws": "^6.2.1",
-    "yjs": "^14.0.0-7"
+    "ws": "^6.2.1"
+  },
+  "peerDependencies": {
+    "yjs": "^13 || ^14"
   },
   "devDependencies": {
     "@types/node": "^24.0.1",
     "@types/ws": "^8.5.10",
     "rollup": "^4.39.0",
     "standard": "^17.1.2",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "yjs": "^14.0.0-7"
   },
   "engines": {
     "npm": ">=8.0.0",

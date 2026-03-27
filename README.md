@@ -45,7 +45,7 @@ const multiplexProvider = new MultiplexProvider(
   }
 )
 
-const binding = multiplexProvider.attach('my-roomname', doc)
+const binding = multiplexProvider.attach('version', doc)
 
 binding.on('status', event => {
   console.log(event.status)
@@ -66,18 +66,18 @@ const multiplexProvider = new MultiplexProvider(
   'ticket'
 )
 
-const providerA = multiplexProvider.attach('room-a', docA)
-const providerB = multiplexProvider.attach('room-b', docB)
+const providerA = multiplexProvider.attach('doc-a', docA)
+const providerB = multiplexProvider.attach('doc-b', docB)
 
 providerA.on('status', event => {
-  console.log('room-a', event.status)
+  console.log('doc-a', event.status)
 })
 
 providerB.on('status', event => {
-  console.log('room-b', event.status)
+  console.log('doc-b', event.status)
 })
 
-multiplexProvider.detach('room-b')
+multiplexProvider.detach('doc-b')
 ```
 
 `MultiplexProvider` is the only supported client protocol. It builds the final websocket URL from `serverUrl`, `roomName`, and `opts`, and automatically appends `multiplex=true` to the query string.
@@ -134,10 +134,10 @@ wss.on('connection', (ws, request) => {
   })))
 
   // Access a routed doc by namespace + attach(docName, doc).
-  console.log(getDoc('ticket', 'my-roomname'))
+  console.log(getDoc('ticket', 'version'))
 
   // List the websocket connections currently attached to a routed doc.
-  console.log(getConnectionsForDoc('ticket', 'my-roomname'))
+  console.log(getConnectionsForDoc('ticket', 'version'))
 })
 
 server.on('upgrade', (request, socket, head) => {
@@ -149,7 +149,7 @@ server.on('upgrade', (request, socket, head) => {
 server.listen(1234)
 
 // Clean the current in-memory doc instance by namespace + routed docName when needed.
-cleanDoc('ticket', 'my-roomname')
+cleanDoc('ticket', 'version')
 ```
 
 The server always speaks the routed multiplex protocol. A single doc connection is simply a multiplex connection with one attached route.
@@ -238,6 +238,8 @@ multiplexProvider.destroy()
 In this example, `/connect/doc/ticket` remains available for application routing or authorization, while `page:1:editor` and `page:1:comments` are multiplex sub-routes that share one websocket connection and keep independent Y.Doc sync and awareness state.
 
 If you only need one doc, attach exactly one route and use it the same way.
+
+For example, if the client calls `attach('version', doc)`, the server should read that doc with `getDoc('ticket', 'version')`.
 
 ### Websocket Server with Persistence
 
