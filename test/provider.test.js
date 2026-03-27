@@ -143,7 +143,7 @@ test('scopes the same docName by namespace', async () => {
     throw new Error('The same docName leaked across rooms')
   }
 
-  if (getDoc('ticket-a', 'version') === undefined || getDoc('ticket-b', 'version') === undefined) {
+  if (getDoc('ticket-a', 'version') == null || getDoc('ticket-b', 'version') == null) {
     throw new Error('Room-scoped docs were not registered separately')
   }
 
@@ -281,7 +281,6 @@ test('exposes routed docs for a websocket connection and removes docs manually',
     throw new Error('cleanDoc should return true for an existing doc')
   }
 
-  await waitFor(() => getDoc('ticket', 'doc-b') === undefined, 'cleanDoc did not remove the doc from the server registry')
   await waitFor(() => getDocsForConnection(ws).length === 1, 'cleanDoc did not detach the doc from the websocket')
   await waitFor(() => getConnectionsForDoc('ticket', 'doc-b').length === 0, 'cleanDoc did not clear the doc connection registry')
 
@@ -297,9 +296,12 @@ test('automatically removes docs when the last connection closes', async () => {
   const binding = provider.attach('auto-cleanup-doc', doc, { disableBc: true })
 
   await waitFor(() => binding.synced, 'Binding never synced')
-  await waitFor(() => getDoc('ticket', 'auto-cleanup-doc') !== undefined, 'Doc was never registered in the server registry')
+  await waitFor(() => getConnectionsForDoc('ticket', 'auto-cleanup-doc').length === 1, 'Doc was never registered in the server registry')
 
   await destroyProvider(provider)
-  await waitFor(() => getDoc('ticket', 'auto-cleanup-doc') === undefined, 'Doc was not removed after the last connection closed')
+  await waitFor(() => getConnectionsForDoc('ticket', 'auto-cleanup-doc').length === 0, 'Doc was not removed after the last connection closed')
+  if (cleanDoc('ticket', 'auto-cleanup-doc')) {
+    throw new Error('cleanDoc should return false after automatic cleanup removed the doc')
+  }
   await testServer.close()
 })

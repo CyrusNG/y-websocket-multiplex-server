@@ -94,7 +94,7 @@ The client `namespace`, server `namespace`, and routed `docName` are different:
 
 If you need the shared physical websocket on the client, call `multiplexProvider.getWebSocket()`. It returns `null` before the websocket is connected.
 
-If you call `getDoc(namespace, docName)` on the server, use the namespace passed to `setupWSConnection(...)` and the same `docName` string that was passed as the first argument to `attach(...)`.
+On the server, call `getDoc(namespace, docName)` with the same namespace passed to `setupWSConnection(...)` and the same `docName` string used in `attach(...)`. If the doc does not exist yet, `getDoc(...)` creates it.
 
 ## Websocket Server
 
@@ -135,11 +135,14 @@ wss.on('connection', (ws, request) => {
     docName: doc.docName
   })))
 
-  // Access a routed doc by namespace + attach(docName, doc).
+  // Access or create a routed doc by namespace + attach(docName, doc).
   console.log(getDoc('ticket', 'version'))
 
   // List the websocket connections currently attached to a routed doc.
   console.log(getConnectionsForDoc('ticket', 'version'))
+
+  // Clean the current in-memory doc instance for a routed doc when needed.
+  cleanDoc('ticket', 'version')
 })
 
 server.on('upgrade', (request, socket, head) => {
@@ -149,9 +152,6 @@ server.on('upgrade', (request, socket, head) => {
 })
 
 server.listen(1234)
-
-// Clean the current in-memory doc instance by namespace + routed docName when needed.
-cleanDoc('ticket', 'version')
 ```
 
 The server always speaks the routed multiplex protocol. A single doc connection is simply a multiplex connection with one attached route.

@@ -153,14 +153,14 @@ export class WSSharedDoc extends Y.Doc {
 }
 
 /**
- * Gets a Y.Doc by name, whether in memory or on disk
+ * Gets or creates a Y.Doc by name, whether in memory or on disk
  *
  * @param {string} namespace - the namespace of the Y.Doc
  * @param {string} docname - the routed name of the Y.Doc to find or create
  * @param {boolean} gc - whether to allow gc on the doc (applies only when created)
  * @return {WSSharedDoc}
  */
-export const getYDoc = (namespace, docname, gc = true) => map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
+const getOrCreateDoc = (namespace, docname, gc = true) => map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
   const doc = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
   doc.gc = gc
   if (persistence !== null) {
@@ -173,9 +173,9 @@ export const getYDoc = (namespace, docname, gc = true) => map.setIfUndefined(doc
 /**
  * @param {string} namespace
  * @param {string} docName
- * @return {WSSharedDoc | undefined}
+ * @return {WSSharedDoc}
  */
-export const getDoc = (namespace, docName) => docs.get(createDocKey(namespace, docName))
+export const getDoc = (namespace, docName) => getOrCreateDoc(namespace, docName)
 
 /**
  * @param {import('ws').WebSocket} conn
@@ -403,7 +403,7 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
     if (current !== undefined) {
       return current
     }
-    const doc = getYDoc(namespace, docName, gc)
+    const doc = getOrCreateDoc(namespace, docName, gc)
     const routeConn = {
       ws: conn,
       get readyState () {
