@@ -183,6 +183,24 @@ test('shares one websocket across multiple routed docs', async () => {
   await testServer.close()
 })
 
+test('exposes the shared physical websocket through getWebSocket()', async () => {
+  const testServer = await createTestServer()
+
+  const provider = new MultiplexProvider(testServer.url, 'ticket', { WebSocketPolyfill: WebSocket })
+  const doc = new Y.Doc()
+  const binding = provider.attach('doc-a', doc, { disableBc: true })
+
+  await waitFor(() => binding.synced, 'Binding never synced')
+  await waitFor(() => provider.getWebSocket() !== null, 'Provider never exposed the shared websocket')
+
+  if (provider.getWebSocket() !== provider.wsManager.ws) {
+    throw new Error('getWebSocket() did not return the current shared websocket')
+  }
+
+  await destroyProvider(provider)
+  await testServer.close()
+})
+
 test('sends sync step 1 when attaching after the websocket is already open', async () => {
   const testServer = await createTestServer()
 

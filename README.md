@@ -80,17 +80,19 @@ providerB.on('status', event => {
 multiplexProvider.detach('doc-b')
 ```
 
-`MultiplexProvider` is the only supported client protocol. It builds the final websocket URL from `serverUrl`, `roomName`, and `opts`, and automatically appends `multiplex=true` to the query string.
+`MultiplexProvider` is the only supported client protocol. It builds the final websocket URL from `serverUrl`, `namespace`, and `opts`, and automatically appends `multiplex=true` to the query string.
 
 Connection-level options such as `connect`, `params`, `protocols`, `WebSocketPolyfill`, and `maxBackoffTime` belong on `new MultiplexProvider(...)`.
 Doc-level options such as `awareness`, `connect`, `resyncInterval`, and `disableBc` belong on `attach(...)`.
 When `disableBc` is `false`, routed docs also sync across browser tabs using `BroadcastChannel` with a localStorage fallback from `lib0`.
 
-`roomName`, `namespace`, and routed `docName` are different:
+The client `namespace`, server `namespace`, and routed `docName` are different:
 
-- `roomName` belongs to `new MultiplexProvider(serverUrl, roomName, ...)` and is used to build the websocket URL
-- `namespace` belongs to `setupWSConnection(namespace, ws, req, ...)` and is the server-side isolation boundary
+- The client `namespace` belongs to `new MultiplexProvider(serverUrl, namespace, ...)` and is used to build the websocket URL
+- The server `namespace` belongs to `setupWSConnection(namespace, ws, req, ...)` and is the server-side isolation boundary
 - `docName` belongs to `attach(docName, doc, ...)` and is scoped inside that server-side namespace
+
+If you need the shared physical websocket on the client, call `multiplexProvider.getWebSocket()`. It returns `null` before the websocket is connected.
 
 If you call `getDoc(namespace, docName)` on the server, use the namespace passed to `setupWSConnection(...)` and the same `docName` string that was passed as the first argument to `attach(...)`.
 

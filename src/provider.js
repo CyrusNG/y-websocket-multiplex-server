@@ -64,12 +64,12 @@ class Observable {
 
 /**
  * @param {string} serverUrl
- * @param {string} roomName
+ * @param {string} namespace
  * @param {Object<string, string>} params
  */
-const createProviderUrl = (serverUrl, roomName, params) => {
+const createProviderUrl = (serverUrl, namespace, params) => {
   const normalizedServerUrl = serverUrl.endsWith('/') ? serverUrl : `${serverUrl}/`
-  const url = new URL(roomName, normalizedServerUrl)
+  const url = new URL(namespace, normalizedServerUrl)
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value)
   })
@@ -505,7 +505,7 @@ class MultiplexBinding extends Observable {
 export class MultiplexProvider {
   /**
    * @param {string} serverUrl
-   * @param {string} roomName
+   * @param {string} namespace
    * @param {Object} [opts]
    * @param {boolean} [opts.connect]
    * @param {Object<string, string>} [opts.params]
@@ -513,7 +513,7 @@ export class MultiplexProvider {
    * @param {typeof WebSocket} [opts.WebSocketPolyfill]
    * @param {number} [opts.maxBackoffTime]
    */
-  constructor (serverUrl, roomName, {
+  constructor (serverUrl, namespace, {
     connect = true,
     params = {},
     protocols,
@@ -524,14 +524,23 @@ export class MultiplexProvider {
       throw new Error('MultiplexProvider requires a WebSocket implementation')
     }
     this.serverUrl = serverUrl
-    this.roomName = roomName
-    this.url = createProviderUrl(serverUrl, roomName, params)
+    this.namespace = namespace
+    this.url = createProviderUrl(serverUrl, namespace, params)
     this.shouldConnect = connect
     /**
      * @type {Map<string, MultiplexBinding>}
      */
     this.bindings = new Map()
     this.wsManager = getSocketManager(this.url, { WebSocketPolyfill, protocols, maxBackoffTime })
+  }
+
+  /**
+   * Returns the shared physical websocket used by this provider, or null before connect.
+   *
+   * @returns {WebSocket|null}
+   */
+  getWebSocket () {
+    return this.wsManager.ws
   }
 
   /**
