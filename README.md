@@ -245,13 +245,33 @@ For example, if the client calls `attach('version', doc)`, the server should rea
 
 ### Websocket Server with Persistence
 
-Persist document updates in a LevelDB database.
+This project supports injecting a persistence adapter in `setupWSConnection(...)`, similar to `y-websocket-server`.
 
-See [LevelDB Persistence](https://github.com/yjs/y-leveldb) for more info.
+With `y-redis`:
 
-```sh
-HOST=localhost PORT=1234 YPERSISTENCE=./dbDir npx y-websocket
+```js
+import { RedisPersistence } from 'y-redis'
+import { setupWSConnection } from '@y/websocket-server/utils'
+
+const redisPersistence = new RedisPersistence({
+  redisOpts: { host: '127.0.0.1', port: 6379 }
+})
+
+const persistence = {
+  bindState: async (docName, ydoc) => await redisPersistence.bindState(docName, ydoc),
+  unbindState: async (docName, ydoc) => await redisPersistence.closeDoc(docName)
+}
+
+wss.on('connection', (ws, request) => {
+  setupWSConnection('ticket', ws, request, { persistence })
+})
 ```
+
+`setupWSConnection` accepts:
+
+* A persistence adapter object with `{ bindState, unbindState }`
+
+Note: this multiplex server manages docs by `namespace + docName` routes, so it does not use a single `doc` option like single-document servers.
 
 ### Websocket Server with HTTP callback
 

@@ -24,23 +24,36 @@ const wsReadyStateClosed = 3 // eslint-disable-line
 const gcEnabled = process.env.GC !== 'false' && process.env.GC !== '0'
 // const persistenceDir = process.env.YPERSISTENCE
 /**
- * @type {{bindState: function(string,WSSharedDoc):void, writeState:function(string,WSSharedDoc):Promise<any>, provider: any}|null}
+ * @type {{bindState: function(string,WSSharedDoc):(Promise<any>|any), unbindState:function(string,WSSharedDoc):(Promise<any>|any), provider: any}|null}
  */
 let persistence = null
 
 /**
- * @param {{bindState: function(string,WSSharedDoc):void,
- * writeState:function(string,WSSharedDoc):Promise<any>,provider:any}|null} persistence_
+ * @param {{bindState: function(string,WSSharedDoc):(Promise<any>|any),
+ * unbindState:function(string,WSSharedDoc):(Promise<any>|any),provider:any}|null} persistence_
  */
 export const setPersistence = persistence_ => {
   persistence = persistence_
 }
 
 /**
- * @return {null|{bindState: function(string,WSSharedDoc):void,
-  * writeState:function(string,WSSharedDoc):Promise<any>}|null} used persistence layer
+ * @return {null|{bindState: function(string,WSSharedDoc):(Promise<any>|any),
+  * unbindState:function(string,WSSharedDoc):(Promise<any>|any)}|null} used persistence layer
   */
 export const getPersistence = () => persistence
+
+/**
+ * @param {any} persistence_
+ */
+const normalizePersistence = persistence_ => {
+  if (persistence_ == null) {
+    return null
+  }
+  if (typeof persistence_.bindState === 'function' && typeof persistence_.unbindState === 'function') {
+    return persistence_
+  }
+  throw new Error('Invalid persistence: expected { bindState, unbindState }')
+}
 
 /**
  * @type {Map<string,WSSharedDoc>}
@@ -164,7 +177,10 @@ const getOrCreateDoc = (namespace, docname, gc = true) => map.setIfUndefined(doc
   const doc = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
   doc.gc = gc
   if (persistence !== null) {
-    persistence.bindState(doc.name, doc)
+    doc.whenInitialized = Promise.all([
+      doc.whenInitialized,
+      Promise.resolve(persistence.bindState(doc.name, doc))
+    ]).then(() => undefined)
   }
   docs.set(doc.name, doc)
   return doc
@@ -212,7 +228,7 @@ const cleanupDoc = doc => {
     docsBeingRemoved.delete(doc.name)
   }
   if (persistence !== null) {
-    persistence.writeState(doc.name, doc).finally(cleanup)
+    persistence.unbindState(doc.name, doc).finally(cleanup)
   } else {
     cleanup()
   }
@@ -325,7 +341,14 @@ const encodeRouteMessage = (docName, message) => {
  * @param {WSSharedDoc} doc
  * @param {any} conn
  */
-const initializeConnection = (doc, conn) => {
+const initializeConnection = async (doc, conn) => {
+  try {
+    await doc.whenInitialized
+  } catch (err) {
+    console.error(err)
+    closeConn(doc, conn)
+    return
+  }
   doc.conns.set(conn, new Set())
   {
     const encoder = encoding.createEncoder()
@@ -390,7 +413,7 @@ const setupHeartbeat = conn => {
  */
 const setupMultiplexConnection = (conn, namespace, gc) => {
   /**
-   * @type {Map<string, { doc: WSSharedDoc, routeConn: any }>}
+   * @type {Map<string, { doc: WSSharedDoc, routeConn: any, initialized: Promise<void> }>}
    */
   const routeConns = new Map()
   connectionDocs.set(conn, routeConns)
@@ -418,8 +441,11 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
         closeRouteConn(docName)
       }
     }
-    initializeConnection(doc, routeConn)
-    const routeState = { doc, routeConn }
+    const routeState = {
+      doc,
+      routeConn,
+      initialized: initializeConnection(doc, routeConn)
+    }
     routeConns.set(docName, routeState)
     return routeState
   }
@@ -449,7 +475,9 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
       const docName = decoding.readVarString(decoder)
       const routedMessage = decoding.readVarUint8Array(decoder)
       const routeState = getOrCreateRouteConn(docName)
-      messageListener(routeState.routeConn, routeState.doc, routedMessage)
+      routeState.initialized.then(() => {
+        messageListener(routeState.routeConn, routeState.doc, routedMessage)
+      })
     } catch (err) {
       console.error(err)
     }
@@ -468,10 +496,14 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
  * @param {string | undefined} namespace
  * @param {import('ws').WebSocket} conn
  * @param {import('http').IncomingMessage} req
- * @param {{ gc?: boolean }} [opts]
+ * @param {{ gc?: boolean, persistence?: any }} [opts]
  */
 export const setupWSConnection = (namespace, conn, req, opts = {}) => {
   const { gc = true } = opts
+  const normalizedPersistence = normalizePersistence(opts.persistence)
+  if (normalizedPersistence !== null) {
+    setPersistence(normalizedPersistence)
+  }
   conn.binaryType = 'arraybuffer'
   setupHeartbeat(conn)
   setupMultiplexConnection(conn, namespace || getRequestNamespace(req), gc)
