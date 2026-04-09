@@ -33,7 +33,7 @@ let persistence = null
  * unbindState:function(string,WSSharedDoc):(Promise<any>|any),provider:any}|null} persistence_
  */
 export const setPersistence = persistence_ => {
-  persistence = persistence_
+  persistence = normalizePersistence(persistence_)
 }
 
 /**
@@ -496,14 +496,10 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
  * @param {string | undefined} namespace
  * @param {import('ws').WebSocket} conn
  * @param {import('http').IncomingMessage} req
- * @param {{ gc?: boolean, persistence?: any }} [opts]
+ * @param {{ gc?: boolean }} [opts]
  */
 export const setupWSConnection = (namespace, conn, req, opts = {}) => {
   const { gc = true } = opts
-  const normalizedPersistence = normalizePersistence(opts.persistence)
-  if (normalizedPersistence !== null) {
-    setPersistence(normalizedPersistence)
-  }
   conn.binaryType = 'arraybuffer'
   setupHeartbeat(conn)
   setupMultiplexConnection(conn, namespace || getRequestNamespace(req), gc)

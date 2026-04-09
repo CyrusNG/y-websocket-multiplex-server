@@ -245,13 +245,13 @@ For example, if the client calls `attach('version', doc)`, the server should rea
 
 ### Websocket Server with Persistence
 
-This project supports injecting a persistence adapter in `setupWSConnection(...)`, similar to `y-websocket-server`.
+This project configures persistence globally via `setPersistence(...)` (once at startup), then uses `setupWSConnection(...)` per websocket connection.
 
 With `y-redis`:
 
 ```js
 import { RedisPersistence } from 'y-redis'
-import { setupWSConnection } from '@y/websocket-server/utils'
+import { setPersistence, setupWSConnection } from '@y/websocket-server/utils'
 
 const redisPersistence = new RedisPersistence({
   redisOpts: { host: '127.0.0.1', port: 6379 }
@@ -262,12 +262,14 @@ const persistence = {
   unbindState: async (docName, ydoc) => await redisPersistence.closeDoc(docName)
 }
 
+setPersistence(persistence)
+
 wss.on('connection', (ws, request) => {
-  setupWSConnection('ticket', ws, request, { persistence })
+  setupWSConnection('ticket', ws, request)
 })
 ```
 
-`setupWSConnection` accepts:
+`setPersistence` accepts:
 
 * A persistence adapter object with `{ bindState, unbindState }`
 
