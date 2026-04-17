@@ -6,10 +6,10 @@ import {
   cleanDoc,
   getDoc,
   getConnectionsForDoc,
-  getDocsForConnection,
-  setupWSConnection
-} from '../src/utils.js'
-import { MultiplexProvider } from '../src/provider.js'
+  getDocsForConnection
+} from '../src/utils-docs.js'
+import { setupWSConnection } from '../src/utils-connection.js'
+import { MultiplexProvider } from '../src/multiplex-provider.js'
 
 /**
  * @param {() => boolean} predicate

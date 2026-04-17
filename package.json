@@ -1,6 +1,6 @@
 {
   "name": "y-multiplex-websocket-server",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "multiplex y-websocket",
   "type": "module",
   "sideEffects": false,
@@ -12,7 +12,7 @@
     "preversion": "npm run lint && npm run dist && test -e dist/src/server.d.ts && test -e dist/server.cjs"
   },
   "bin": {
-    "y-websocket-server": "src/server.js",
+    "y-websocket-multiplex-server": "src/server.js",
     "y-websocket": "src/server.js"
   },
   "files": [
@@ -25,23 +25,35 @@
       "types": "./dist/src/server.d.ts",
       "default": "./src/server.js"
     },
-    "./utils": {
-      "import": "./src/utils.js",
-      "require": "./dist/utils.cjs",
-      "types": "./dist/src/utils.d.ts",
-      "default": "./src/utils.js"
+    "./utils-docs": {
+      "import": "./src/utils-docs.js",
+      "require": "./dist/utils-docs.cjs",
+      "types": "./dist/src/utils-docs.d.ts",
+      "default": "./src/utils-docs.js"
     },
-    "./provider": {
-      "import": "./src/provider.js",
-      "require": "./dist/provider.cjs",
-      "types": "./dist/src/provider.d.ts",
-      "default": "./src/provider.js"
+    "./utils-connection": {
+      "import": "./src/utils-connection.js",
+      "require": "./dist/utils-connection.cjs",
+      "types": "./dist/src/utils-connection.d.ts",
+      "default": "./src/utils-connection.js"
+    },
+    "./multiplex-provider": {
+      "import": "./src/multiplex-provider.js",
+      "require": "./dist/multiplex-provider.cjs",
+      "types": "./dist/src/multiplex-provider.d.ts",
+      "default": "./src/multiplex-provider.js"
     },
     "./callback": {
       "import": "./src/callback.js",
       "require": "./dist/callback.cjs",
       "types": "./dist/src/callback.d.ts",
       "default": "./src/callback.js"
+    },
+    "./cluster": {
+      "import": "./src/cluster.js",
+      "require": "./dist/cluster.cjs",
+      "types": "./dist/src/cluster.d.ts",
+      "default": "./src/cluster.js"
     }
   },
   "repository": {
@@ -69,6 +81,7 @@
   "dependencies": {
     "@y/protocols": "1.0.6-1",
     "lib0": "^0.2.102",
+    "nats": "^2.29.3",
     "ws": "^6.2.1"
   },
   "peerDependencies": {

@@ -4,6 +4,10 @@ import * as encoding from 'lib0/encoding'
 import * as decoding from 'lib0/decoding'
 import * as broadcastchannel from 'lib0/broadcastchannel'
 
+/**
+ * @typedef {import('./types.js').Listener} Listener
+ */
+
 const messageSync = 0
 const messageAwareness = 1
 const messageRoute = 2
@@ -11,10 +15,6 @@ const messageRouteClose = 3
 
 const wsReadyStateConnecting = 0
 const wsReadyStateOpen = 1
-
-/**
- * @typedef {(...args: Array<any>) => void} Listener
- */
 
 class Observable {
   constructor () {
@@ -502,7 +502,7 @@ class MultiplexBinding extends Observable {
   }
 }
 
-export class MultiplexProvider {
+class MultiplexProvider {
   /**
    * @param {string} serverUrl
    * @param {string} namespace
@@ -605,3 +605,5 @@ export class MultiplexProvider {
     })
   }
 }
+
+export { MultiplexProvider }

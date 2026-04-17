@@ -1,5 +1,5 @@
 
-# y-websocket-server :tophat:
+# y-websocket-multiplex-server :tophat:
 > Simple backend for [y-websocket](https://github.com/yjs/y-websocket)
 
 The Websocket Provider is a solid choice if you want a central source that
@@ -12,10 +12,10 @@ this server.
 ### Install dependencies
 
 ```sh
-npm i @y/websocket-server
+npm i y-multiplex-websocket-server
 ```
 
-### Start a y-websocket server
+### Start a y-multiplex-websocket-server server
 
 This repository implements a basic server that you can adopt to your specific use-case. [(source code)](./src/)
 
@@ -31,7 +31,7 @@ Single routed doc:
 
 ```js
 import * as Y from 'yjs'
-import { MultiplexProvider } from '@y/websocket-server/provider'
+import { MultiplexProvider } from 'y-multiplex-websocket-server/multiplex-provider'
 
 const doc = new Y.Doc()
 
@@ -56,7 +56,7 @@ Multiple routed docs on one websocket:
 
 ```js
 import * as Y from 'yjs'
-import { MultiplexProvider } from '@y/websocket-server/provider'
+import { MultiplexProvider } from 'y-multiplex-websocket-server/multiplex-provider'
 
 const docA = new Y.Doc()
 const docB = new Y.Doc()
@@ -106,6 +106,96 @@ HOST=localhost PORT=1234 npx y-websocket
 
 Since npm symlinks the `y-websocket` executable from your local `./node_modules/.bin` folder, you can simply run npx. The `PORT` environment variable already defaults to 1234, and `HOST` defaults to `localhost`.
 
+### NATS Cluster Sync (Server-to-Server)
+
+This project now includes a server cluster sync layer for Yjs docs and awareness:
+
+- setup API: `setupYdocCluster(...)` (`y-multiplex-websocket-server/cluster`)
+
+Enable in the bundled server with environment variables:
+
+```sh
+NATS_SERVERS=nats://127.0.0.1:4222 NATS_NODE_ID=node-a npx y-websocket
+```
+
+Or wire it manually in custom server code:
+
+```js
+import { setupYdocCluster } from 'y-multiplex-websocket-server/cluster'
+import { startWebsocketServer } from 'y-multiplex-websocket-server/server'
+
+setupYdocCluster({
+  nodeId: 'node-a',
+  servers: ['nats://127.0.0.1:4222'],
+  prefix: 'yjs',
+  defaultNamespace: 'default',
+  resyncIntervalMs: 30000
+})
+
+await startWebsocketServer({
+  host: '127.0.0.1',
+  port: 1234
+})
+```
+
+`setupYdocCluster(...)` enables server-to-server Yjs sync (`update`, `awareness`, `stateVector` recovery),
+also stores the instance internally so you can access it anywhere.
+If your host app already manages cluster membership, use host events to push cluster changes:
+
+```js
+import { setupYdocCluster, getYdocCluster } from 'y-multiplex-websocket-server/cluster'
+
+setupYdocCluster({
+  nodeId: hostNodeId,       // cluster node id of current nodejs service
+  nats: hostNatsConnection, // host-owned nats connection instance
+  prefix: 'yjs',
+  requestTimeoutMs: 1500,
+  maxRetries: 2,
+  chooseSyncNode: (docKey, aliveNodes, currentSyncNode) => hostCluster.pickSyncNode(docKey, aliveNodes, currentSyncNode) // optional instead of setNodes() function
+})
+
+hostCluster.onMembershipChanged(({ aliveNodeIds, leaderNodeId, addedNodeIds, removedNodeIds }) => {
+  const ydocCluster = getYdocCluster()
+  if (!ydocCluster)  return
+  // Pass host leader as syncNode.
+  ydocCluster.setNodes(leaderNodeId, aliveNodeIds)
+  removedNodeIds.forEach(nodeId => ydocCluster.removeNode(nodeId))
+  ydocCluster.resyncAllDocs().catch(err => {
+    console.error('resync all docs failed', err)
+  })
+})
+
+```
+
+If you do not pass `nats`, `setupYdocCluster(...)` creates an internal `NatsBus`.
+`NatsBus` supports passthrough `connectOptions` for native NATS client config (auth/tls/reconnect tuning/etc):
+
+```js
+setupYdocCluster({
+  nodeId: hostNodeId,
+  connectOptions: {
+    servers: ['nats://127.0.0.1:4222'],
+    user: process.env.NATS_USER,
+    pass: process.env.NATS_PASS
+    // token, tls, reconnect, nkey/jwt and other nats.connect options are supported too.
+  }
+})
+```
+
+Host events with `setNodes(syncNode, aliveNodes)` let the host own:
+
+- active node bookkeeping
+- node down events that should clear awareness ownership
+- default sync target selection (`syncNode`) for `stateVector -> diffUpdate` resync
+
+Sync target selection priority in this project:
+
+1. Use `chooseSyncNode(docKey, aliveNodes, currentSyncNode)` when configured and it returns a valid alive node.
+2. Otherwise use `syncNode` from `setNodes(syncNode, aliveNodes)`.
+3. If both are unavailable, fallback to any non-local alive node.
+
+The project does not define a leader concept. If your host uses leader election, pass that leader as `syncNode`.
+
 ### Custom Server Code
 
 ```js
@@ -115,9 +205,9 @@ import {
   cleanDoc,
   getDoc,
   getConnectionsForDoc,
-  getDocsForConnection,
-  setupWSConnection
-} from '@y/websocket-server/utils'
+  getDocsForConnection
+} from 'y-multiplex-websocket-server/utils-docs'
+import { setupWSConnection } from 'y-multiplex-websocket-server/utils-connection'
 
 const server = http.createServer((_request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -164,7 +254,7 @@ Server:
 ```js
 import http from 'http'
 import WebSocket from 'ws'
-import { setupWSConnection } from '@y/websocket-server/utils'
+import { setupWSConnection } from 'y-multiplex-websocket-server/utils-connection'
 
 const server = http.createServer((_request, response) => {
   response.writeHead(200, { 'Content-Type': 'text/plain' })
@@ -192,7 +282,7 @@ Client:
 
 ```js
 import * as Y from 'yjs'
-import { MultiplexProvider } from '@y/websocket-server/provider'
+import { MultiplexProvider } from 'y-multiplex-websocket-server/multiplex-provider'
 
 const multiplexProvider = new MultiplexProvider(
   'ws://localhost:1234/connect/doc',
@@ -251,7 +341,8 @@ With `y-redis`:
 
 ```js
 import { RedisPersistence } from 'y-redis'
-import { setPersistence, setupWSConnection } from '@y/websocket-server/utils'
+import { setPersistence } from 'y-multiplex-websocket-server/utils-docs'
+import { setupWSConnection } from 'y-multiplex-websocket-server/utils-connection'
 
 const redisPersistence = new RedisPersistence({
   redisOpts: { host: '127.0.0.1', port: 6379 }
@@ -294,4 +385,4 @@ This sends a debounced callback to `localhost:3000` 2 seconds after receiving an
 
 ## License
 
-[The MIT License](./LICENSE) © Kevin Jahns
+[The MIT License](./LICENSE) © Cyrus NG

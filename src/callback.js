@@ -8,7 +8,7 @@ const CALLBACK_OBJECTS = process.env.CALLBACK_OBJECTS ? JSON.parse(process.env.C
 export const isCallbackSet = !!CALLBACK_URL
 
 /**
- * @param {import('./utils.js').WSSharedDoc} doc
+ * @param {import('./utils-docs.js').WSSharedDoc} doc
  */
 export const callbackHandler = (doc) => {
   const room = doc.name
@@ -61,7 +61,7 @@ const callbackRequest = (url, timeout, data) => {
 /**
  * @param {string} objName
  * @param {string} objType
- * @param {import('./utils.js').WSSharedDoc} doc
+ * @param {import('./utils-docs.js').WSSharedDoc} doc
  */
 const getContent = (objName, objType, doc) => {
   switch (objType) {
