@@ -45,7 +45,7 @@ const multiplexProvider = new MultiplexProvider(
   }
 )
 
-const binding = multiplexProvider.attach('version', doc)
+const binding = multiplexProvider.attach('version', doc, { awareness: true })
 
 binding.on('status', event => {
   console.log(event.status)
@@ -66,8 +66,8 @@ const multiplexProvider = new MultiplexProvider(
   'ticket'
 )
 
-const providerA = multiplexProvider.attach('doc-a', docA)
-const providerB = multiplexProvider.attach('doc-b', docB)
+const providerA = multiplexProvider.attach('doc-a', docA, { awareness: true })
+const providerB = multiplexProvider.attach('doc-b', docB, { awareness: true })
 
 providerA.on('status', event => {
   console.log('doc-a', event.status)
@@ -84,6 +84,7 @@ multiplexProvider.detach('doc-b')
 
 Connection-level options such as `connect`, `params`, `protocols`, `WebSocketPolyfill`, and `maxBackoffTime` belong on `new MultiplexProvider(...)`.
 Doc-level options such as `awareness`, `connect`, `resyncInterval`, and `disableBc` belong on `attach(...)`.
+`attach(...)` does not create awareness by default; set `awareness: true` (or pass an `Awareness` instance) when presence is needed.
 When `disableBc` is `false`, routed docs also sync across browser tabs using `BroadcastChannel` with a localStorage fallback from `lib0`.
 
 The client `namespace`, server `namespace`, and routed `docName` are different:
@@ -314,8 +315,9 @@ const multiplexProvider = new MultiplexProvider(
 const editorDoc = new Y.Doc()
 const commentDoc = new Y.Doc()
 
-const editorBinding = multiplexProvider.attach('page:1:editor', editorDoc)
+const editorBinding = multiplexProvider.attach('page:1:editor', editorDoc, { awareness: true })
 const commentBinding = multiplexProvider.attach('page:1:comments', commentDoc, {
+  awareness: true,
   resyncInterval: 5000,
   disableBc: true
 })
@@ -348,7 +350,7 @@ In this example, `/connect/doc/ticket` remains available for application routing
 
 If you only need one doc, attach exactly one route and use it the same way.
 
-For example, if the client calls `attach('version', doc)`, the server should read that doc with `getDoc('ticket', 'version')`.
+For example, if the client calls `attach('version', doc, { awareness: true })`, the server should read that doc with `getDoc('ticket', 'version')`.
 
 ### Websocket Server with Persistence
 

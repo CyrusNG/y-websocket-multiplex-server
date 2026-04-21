@@ -306,7 +306,7 @@ class MultiplexBinding extends Observable {
    * @param {MultiplexProvider} provider
    * @param {string} docName
    * @param {import('yjs').Doc} doc
-   * @param {awarenessProtocol.Awareness} awareness
+   * @param {awarenessProtocol.Awareness | null} awareness
    * @param {boolean} connect
    * @param {boolean} disableBc
    * @param {number} resyncInterval
@@ -350,7 +350,7 @@ class MultiplexBinding extends Observable {
       /** @type {{ added: Array<number>, updated: Array<number>, removed: Array<number> }} */ changes,
       /** @type {any} */ origin
     ) => {
-      if (origin !== this) {
+      if (origin !== this && this.awareness !== null) {
         const changedClients = changes.added.concat(changes.updated, changes.removed)
         const encoder = encoding.createEncoder()
         encoding.writeVarUint(encoder, messageAwareness)
@@ -367,7 +367,9 @@ class MultiplexBinding extends Observable {
       broadcastchannel.subscribe(this.broadcastChannel, this.bcSubscriber)
     }
     this.doc.on('update', this.docUpdateHandler)
-    this.awareness.on('update', this.awarenessUpdateHandler)
+    if (this.awareness !== null) {
+      this.awareness.on('update', this.awarenessUpdateHandler)
+    }
     this.startResyncInterval()
   }
 
@@ -399,7 +401,9 @@ class MultiplexBinding extends Observable {
     }
     this.removeAwarenessStates()
     this.doc.off('update', this.docUpdateHandler)
-    this.awareness.off('update', this.awarenessUpdateHandler)
+    if (this.awareness !== null) {
+      this.awareness.off('update', this.awarenessUpdateHandler)
+    }
     this.provider.bindings.delete(this.docName)
     this.provider.wsManager.removeProvider(this)
     super.emit('destroy', [this])
@@ -413,8 +417,11 @@ class MultiplexBinding extends Observable {
     encoding.writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, this.doc)
     this.publishMessage(encoding.toUint8Array(encoder))
-    const awarenessState = this.awareness.getLocalState()
-    if (awarenessState !== null) {
+    if (this.awareness !== null) {
+      const awarenessState = this.awareness.getLocalState()
+      if (awarenessState === null) {
+        return
+      }
       const awarenessEncoder = encoding.createEncoder()
       encoding.writeVarUint(awarenessEncoder, messageAwareness)
       encoding.writeVarUint8Array(
@@ -447,11 +454,13 @@ class MultiplexBinding extends Observable {
         this.setSynced(true)
         break
       case messageAwareness:
-        awarenessProtocol.applyAwarenessUpdate(
-          this.awareness,
-          decoding.readVarUint8Array(decoder),
-          this
-        )
+        if (this.awareness !== null) {
+          awarenessProtocol.applyAwarenessUpdate(
+            this.awareness,
+            decoding.readVarUint8Array(decoder),
+            this
+          )
+        }
         break
     }
   }
@@ -468,9 +477,11 @@ class MultiplexBinding extends Observable {
   }
 
   removeAwarenessStates () {
-    const localState = this.awareness.getLocalState()
-    if (localState !== null) {
-      awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], this)
+    if (this.awareness !== null) {
+      const localState = this.awareness.getLocalState()
+      if (localState !== null) {
+        awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], this)
+      }
     }
   }
 
@@ -547,14 +558,14 @@ class MultiplexProvider {
    * @param {string} docName
    * @param {import('yjs').Doc} doc
    * @param {Object} [opts]
-   * @param {awarenessProtocol.Awareness} [opts.awareness]
+   * @param {boolean | awarenessProtocol.Awareness} [opts.awareness]
    * @param {boolean} [opts.connect]
    * @param {boolean} [opts.disableBc]
    * @param {number} [opts.resyncInterval]
    * @returns {MultiplexBinding}
    */
   attach (docName, doc, {
-    awareness = new awarenessProtocol.Awareness(doc),
+    awareness = false,
     connect = true,
     disableBc = false,
     resyncInterval = -1
@@ -563,7 +574,10 @@ class MultiplexProvider {
     if (existing !== undefined) {
       return existing
     }
-    const binding = new MultiplexBinding(this, docName, doc, awareness, connect, disableBc, resyncInterval)
+    const resolvedAwareness = awareness === true
+      ? new awarenessProtocol.Awareness(doc)
+      : (awareness instanceof awarenessProtocol.Awareness ? awareness : null)
+    const binding = new MultiplexBinding(this, docName, doc, resolvedAwareness, connect, disableBc, resyncInterval)
     this.bindings.set(docName, binding)
     this.wsManager.addProvider(binding)
     if (binding.isActive() && this.wsManager.ws !== null && this.wsManager.ws.readyState === wsReadyStateOpen) {

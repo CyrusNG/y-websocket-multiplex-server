@@ -2,6 +2,7 @@ import test from 'node:test'
 import http from 'http'
 import WebSocket from 'ws'
 import * as Y from 'yjs'
+import * as awarenessProtocol from '@y/protocols/awareness'
 import {
   cleanDoc,
   getDoc,
@@ -249,6 +250,36 @@ test('syncs routed docs across providers through BroadcastChannel when enabled',
 
   await destroyProvider(providerA)
   await destroyProvider(providerB)
+})
+
+test('does not create awareness by default when attaching', () => {
+  const provider = new MultiplexProvider('ws://127.0.0.1:1234', 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    connect: false
+  })
+  const doc = new Y.Doc()
+  const binding = provider.attach('no-awareness', doc, { connect: false })
+
+  if (binding.awareness !== null) {
+    throw new Error('Expected no awareness instance unless awareness is explicitly enabled')
+  }
+
+  provider.destroy()
+})
+
+test('creates awareness when awareness: true is set on attach', () => {
+  const provider = new MultiplexProvider('ws://127.0.0.1:1234', 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    connect: false
+  })
+  const doc = new Y.Doc()
+  const binding = provider.attach('with-awareness', doc, { connect: false, awareness: true })
+
+  if (!(binding.awareness instanceof awarenessProtocol.Awareness)) {
+    throw new Error('Expected an awareness instance when awareness: true is set')
+  }
+
+  provider.destroy()
 })
 
 test('exposes routed docs for a websocket connection and removes docs manually', async () => {
