@@ -1,4 +1,5 @@
 import { connect } from 'nats'
+import { createSubjectFormatter } from './nats-subject.js'
 
 /**
  * @typedef {import('./types.js').NatsBusOptions} NatsBusOptions
@@ -10,11 +11,6 @@ const noopUnsub = () => {}
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
-
-/**
- * @param {string} value
- */
-const encodeSubjectToken = value => Buffer.from(value).toString('base64url')
 
 /**
  * @param {string} message
@@ -34,18 +30,18 @@ class NatsBus {
    */
   constructor ({
     nodeId,
-    servers,
     connectOptions = {},
-    prefix = 'yjs',
+    subjectTemplate,
     requestTimeoutMs = 1500,
     maxRetries = 2
   }) {
     this.nodeId = nodeId
-    this.servers = servers
     this.connectOptions = connectOptions
-    this.prefix = prefix
     this.requestTimeoutMs = requestTimeoutMs
     this.maxRetries = maxRetries
+    this.subjectFormatter = createSubjectFormatter({
+      subjectTemplate
+    })
 
     /** @type {any | null} */
     this.nc = null
@@ -62,9 +58,9 @@ class NatsBus {
       return
     }
     const connectOptions = { ...this.connectOptions }
-    const resolvedServers = connectOptions.servers || this.servers
+    const resolvedServers = connectOptions.servers
     if (!resolvedServers || (Array.isArray(resolvedServers) && resolvedServers.length === 0)) {
-      throw new Error('NatsBus requires `servers` or `connectOptions.servers`')
+      throw new Error('NatsBus requires `connectOptions.servers`')
     }
     connectOptions.servers = resolvedServers
     this.nc = await connect(connectOptions)
@@ -95,7 +91,7 @@ class NatsBus {
    */
   async publish (topic, payload) {
     const nc = this.assertConnection()
-    nc.publish(this.topicSubject(topic), payload)
+    nc.publish(this.broadcastSubject(topic), payload)
   }
 
   /**
@@ -105,7 +101,7 @@ class NatsBus {
    */
   async subscribe (topic, handler) {
     const nc = this.assertConnection()
-    const sub = nc.subscribe(this.topicSubject(topic))
+    const sub = nc.subscribe(this.broadcastSubject(topic))
     this.subscriptions.add(sub)
     this.consumeSubscription(sub, async msg => {
       await handler(msg.data, {
@@ -138,7 +134,7 @@ class NatsBus {
     let lastErr = null
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const response = await nc.request(this.rpcSubject(targetNodeId, method), payload, { timeout: timeoutMs })
+        const response = await nc.request(this.unicastSubject(targetNodeId, method), payload, { timeout: timeoutMs })
         return response.data
       } catch (err) {
         lastErr = err
@@ -154,7 +150,7 @@ class NatsBus {
    */
   async handle (method, handler) {
     const nc = this.assertConnection()
-    const subject = this.rpcSubject(this.nodeId, method)
+    const subject = this.unicastSubject(this.nodeId, method)
     const sub = nc.subscribe(subject)
     this.subscriptions.add(sub)
     this.consumeSubscription(sub, async msg => {
@@ -205,16 +201,16 @@ class NatsBus {
   /**
    * @param {string} topic
    */
-  topicSubject (topic) {
-    return `${this.prefix}.topic.${encodeSubjectToken(topic)}`
+  broadcastSubject (topic) {
+    return this.subjectFormatter.broadcastSubject(topic)
   }
 
   /**
    * @param {string} nodeId
    * @param {string} method
    */
-  rpcSubject (nodeId, method) {
-    return `${this.prefix}.node.${encodeSubjectToken(nodeId)}.rpc.${encodeSubjectToken(method)}`
+  unicastSubject (nodeId, method) {
+    return this.subjectFormatter.unicastSubject(nodeId, method)
   }
 }
 

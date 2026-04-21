@@ -126,9 +126,11 @@ import { startWebsocketServer } from 'y-multiplex-websocket-server/server'
 
 setupYdocCluster({
   nodeId: 'node-a',
-  servers: ['nats://127.0.0.1:4222'],
-  prefix: 'yjs',
-  defaultNamespace: 'default',
+  nats: {
+    connectOptions: {
+      servers: ['nats://127.0.0.1:4222']
+    }
+  },
   resyncIntervalMs: 30000
 })
 
@@ -140,6 +142,7 @@ await startWebsocketServer({
 
 `setupYdocCluster(...)` enables server-to-server Yjs sync (`update`, `awareness`, `stateVector` recovery),
 also stores the instance internally so you can access it anywhere.
+NATS subjects now use plain-text broadcast/unicast segments (no base64url encoding), which makes broker-side debugging easier.
 If your host app already manages cluster membership, use host events to push cluster changes:
 
 ```js
@@ -147,10 +150,15 @@ import { setupYdocCluster, getYdocCluster } from 'y-multiplex-websocket-server/c
 
 setupYdocCluster({
   nodeId: hostNodeId,       // cluster node id of current nodejs service
-  nats: hostNatsConnection, // host-owned nats connection instance
-  prefix: 'yjs',
-  requestTimeoutMs: 1500,
-  maxRetries: 2,
+  nats: {
+    connection: hostNatsConnection, // host-owned nats connection instance
+    subjectTemplate: {
+      broadcast: 'myapp.ydoc.broadcast.{topic}.{doc}.{event}',
+      unicast: 'myapp.ydoc.unicast.{nodeId}.{method}'
+    },
+    requestTimeoutMs: 1500,
+    maxRetries: 2
+  },
   chooseSyncNode: (docKey, aliveNodes, currentSyncNode) => hostCluster.pickSyncNode(docKey, aliveNodes, currentSyncNode) // optional instead of setNodes() function
 })
 
@@ -167,17 +175,19 @@ hostCluster.onMembershipChanged(({ aliveNodeIds, leaderNodeId, addedNodeIds, rem
 
 ```
 
-If you do not pass `nats`, `setupYdocCluster(...)` creates an internal `NatsBus`.
-`NatsBus` supports passthrough `connectOptions` for native NATS client config (auth/tls/reconnect tuning/etc):
+If you pass `nats.connectOptions` but not `nats.connection`, `setupYdocCluster(...)` creates an internal `NatsBus`.
+`NatsBus` supports passthrough `nats.connectOptions` for native NATS client config (auth/tls/reconnect tuning/etc):
 
 ```js
 setupYdocCluster({
   nodeId: hostNodeId,
-  connectOptions: {
-    servers: ['nats://127.0.0.1:4222'],
-    user: process.env.NATS_USER,
-    pass: process.env.NATS_PASS
-    // token, tls, reconnect, nkey/jwt and other nats.connect options are supported too.
+  nats: {
+    connectOptions: {
+      servers: ['nats://127.0.0.1:4222'],
+      user: process.env.NATS_USER,
+      pass: process.env.NATS_PASS
+      // token, tls, reconnect, nkey/jwt and other nats.connect options are supported too.
+    }
   }
 })
 ```
@@ -195,6 +205,13 @@ Sync target selection priority in this project:
 3. If both are unavailable, fallback to any non-local alive node.
 
 The project does not define a leader concept. If your host uses leader election, pass that leader as `syncNode`.
+Naming recommendation for `nodeId`, `namespace`, and `docName`: avoid `:`, `.`, `/`, and spaces for easier subject-level debugging.
+
+Template validation rules:
+
+- `nats.subjectTemplate.broadcast` is required to include `{topic}`, `{doc}`, `{event}`.
+- `nats.subjectTemplate.unicast` is required to include `{nodeId}`, `{method}`.
+- Unknown tokens are rejected at startup.
 
 ### Custom Server Code
 

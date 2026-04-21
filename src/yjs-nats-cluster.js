@@ -18,13 +18,11 @@ class YjsNatsCluster {
   constructor ({
     bus,
     nodeId,
-    defaultNamespace = 'default',
     chooseSyncNode,
     resyncIntervalMs = 30000
   }) {
     this.bus = bus
     this.nodeId = nodeId
-    this.defaultNamespace = defaultNamespace
     this.chooseSyncNode = chooseSyncNode || null
     this.resyncIntervalMs = resyncIntervalMs
     this.syncNode = null
@@ -77,7 +75,7 @@ class YjsNatsCluster {
    * @returns {Promise<{ destroy: () => Promise<void>, docName: string, namespace: string }>}
    */
   async bindDoc (namespace, docName, doc, awareness) {
-    const ns = namespace || this.defaultNamespace
+    const ns = namespace
     const docKey = getDocKey(ns, docName)
     if (this.boundDocs.has(docKey)) {
       return {
@@ -147,7 +145,7 @@ class YjsNatsCluster {
    * @returns {Promise<void>}
    */
   async unbindDoc (namespace, docName) {
-    const ns = namespace || this.defaultNamespace
+    const ns = namespace
     const docKey = getDocKey(ns, docName)
     const state = this.boundDocs.get(docKey)
     if (state === undefined) {
@@ -165,7 +163,7 @@ class YjsNatsCluster {
    * @returns {Promise<boolean>}
    */
   async resyncDoc (namespace, docName) {
-    const ns = namespace || this.defaultNamespace
+    const ns = namespace
     const docKey = getDocKey(ns, docName)
     const state = this.boundDocs.get(docKey)
     if (state === undefined) {

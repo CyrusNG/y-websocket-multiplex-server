@@ -19,9 +19,11 @@ const createClusterSyncFromEnv = ({ host, port, env = process.env }) => {
   }
   return setupYdocCluster({
     nodeId: env.NATS_NODE_ID || `${host}:${port}:${process.pid}`,
-    servers: natsServers,
-    prefix: env.NATS_PREFIX || 'yjs',
-    defaultNamespace: env.NATS_NAMESPACE || 'default',
+    nats: {
+      connectOptions: {
+        servers: natsServers
+      }
+    },
     resyncIntervalMs: number.parseInt(env.NATS_RESYNC_INTERVAL || '30000')
   })
 }

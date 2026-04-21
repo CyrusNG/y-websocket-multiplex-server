@@ -1,4 +1,5 @@
 import { NatsBus } from './nats-bus.js'
+import { createSubjectFormatter } from './nats-subject.js'
 import { YjsNatsCluster } from './yjs-nats-cluster.js'
 import { setClusterSync } from './utils-docs.js'
 
@@ -7,7 +8,6 @@ import { setClusterSync } from './utils-docs.js'
  * @typedef {import('./types.js').BusMessageMeta} BusMessageMeta
  */
 
-const encodeSubjectToken = value => Buffer.from(value).toString('base64url')
 /** @type {YDocClusterSyncAdapter|null} */
 let activeYdocCluster = null
 
@@ -16,7 +16,7 @@ class NatsConnectionBus {
    * @param {{
    * nc: any,
    * nodeId: string,
-   * prefix?: string,
+   * subjectTemplate?: { broadcast: string, unicast: string },
    * requestTimeoutMs?: number,
    * maxRetries?: number,
    * closeNatsOnClose?: boolean
@@ -25,17 +25,19 @@ class NatsConnectionBus {
   constructor ({
     nc,
     nodeId,
-    prefix = 'yjs',
+    subjectTemplate,
     requestTimeoutMs = 1500,
     maxRetries = 2,
     closeNatsOnClose = false
   }) {
     this.nc = nc
     this.nodeId = nodeId
-    this.prefix = prefix
     this.requestTimeoutMs = requestTimeoutMs
     this.maxRetries = maxRetries
     this.closeNatsOnClose = closeNatsOnClose
+    this.subjectFormatter = createSubjectFormatter({
+      subjectTemplate
+    })
     /** @type {Set<any>} */
     this.subscriptions = new Set()
   }
@@ -68,7 +70,7 @@ class NatsConnectionBus {
    * @returns {Promise<void>}
    */
   async publish (topic, payload) {
-    this.nc.publish(this.topicSubject(topic), payload)
+    this.nc.publish(this.broadcastSubject(topic), payload)
   }
 
   /**
@@ -77,7 +79,7 @@ class NatsConnectionBus {
    * @returns {Promise<() => void>}
    */
   async subscribe (topic, handler) {
-    const sub = this.nc.subscribe(this.topicSubject(topic))
+    const sub = this.nc.subscribe(this.broadcastSubject(topic))
     this.subscriptions.add(sub)
     this.consumeSubscription(sub, async msg => {
       await handler(msg.data, {
@@ -109,7 +111,7 @@ class NatsConnectionBus {
     let lastErr = null
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const response = await this.nc.request(this.rpcSubject(targetNodeId, method), payload, { timeout: timeoutMs })
+        const response = await this.nc.request(this.unicastSubject(targetNodeId, method), payload, { timeout: timeoutMs })
         return response.data
       } catch (err) {
         lastErr = err
@@ -124,7 +126,7 @@ class NatsConnectionBus {
    * @returns {Promise<() => void>}
    */
   async handle (method, handler) {
-    const sub = this.nc.subscribe(this.rpcSubject(this.nodeId, method))
+    const sub = this.nc.subscribe(this.unicastSubject(this.nodeId, method))
     this.subscriptions.add(sub)
     this.consumeSubscription(sub, async msg => {
       if (!msg.reply) {
@@ -164,16 +166,16 @@ class NatsConnectionBus {
   /**
    * @param {string} topic
    */
-  topicSubject (topic) {
-    return `${this.prefix}.topic.${encodeSubjectToken(topic)}`
+  broadcastSubject (topic) {
+    return this.subjectFormatter.broadcastSubject(topic)
   }
 
   /**
    * @param {string} nodeId
    * @param {string} method
    */
-  rpcSubject (nodeId, method) {
-    return `${this.prefix}.node.${encodeSubjectToken(nodeId)}.rpc.${encodeSubjectToken(method)}`
+  unicastSubject (nodeId, method) {
+    return this.subjectFormatter.unicastSubject(nodeId, method)
   }
 }
 
@@ -182,24 +184,30 @@ class YDocClusterSyncAdapter {
    * @param {CreateClusterSyncOptions} options
    */
   constructor (options) {
+    const natsOptions = options.nats || {}
     if (options.bus) {
       this.bus = options.bus
-    } else if (options.nats) {
+    } else if (natsOptions.connection) {
       this.bus = new NatsConnectionBus({
-        nc: options.nats,
+        nc: natsOptions.connection,
         nodeId: options.nodeId,
-        prefix: options.prefix,
-        requestTimeoutMs: options.requestTimeoutMs,
-        maxRetries: options.maxRetries,
-        closeNatsOnClose: options.closeNatsOnClose
+        subjectTemplate: natsOptions.subjectTemplate,
+        requestTimeoutMs: natsOptions.requestTimeoutMs,
+        maxRetries: natsOptions.maxRetries,
+        closeNatsOnClose: natsOptions.closeNatsOnClose
       })
     } else {
-      this.bus = new NatsBus(options)
+      this.bus = new NatsBus({
+        nodeId: options.nodeId,
+        connectOptions: natsOptions.connectOptions,
+        subjectTemplate: natsOptions.subjectTemplate,
+        requestTimeoutMs: natsOptions.requestTimeoutMs,
+        maxRetries: natsOptions.maxRetries
+      })
     }
     this.cluster = new YjsNatsCluster({
       bus: this.bus,
       nodeId: options.nodeId,
-      defaultNamespace: options.defaultNamespace,
       chooseSyncNode: options.chooseSyncNode,
       resyncIntervalMs: options.resyncIntervalMs
     })

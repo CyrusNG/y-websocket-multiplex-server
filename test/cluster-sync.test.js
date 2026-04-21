@@ -177,7 +177,6 @@ const createClusterNode = ({ nodeId, broker }) => {
   const cluster = new YjsNatsCluster({
     bus,
     nodeId,
-    defaultNamespace: 'default',
     resyncIntervalMs: 0
   })
   return { doc, awareness, cluster }

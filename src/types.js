@@ -4,6 +4,23 @@
  */
 
 /**
+ * @typedef {{
+ * broadcast: string,
+ * unicast: string
+ * }} SubjectTemplate
+ */
+/**
+ * @typedef {{
+ * connection?: any,
+ * connectOptions?: import('nats').ConnectionOptions,
+ * subjectTemplate?: SubjectTemplate,
+ * requestTimeoutMs?: number,
+ * maxRetries?: number,
+ * closeNatsOnClose?: boolean
+ * }} ClusterNatsOptions
+ */
+
+/**
  * Provider / Observable
  */
 /**
@@ -32,9 +49,8 @@
 /**
  * @typedef {{
  * nodeId: string,
- * servers?: Array<string>,
  * connectOptions?: import('nats').ConnectionOptions,
- * prefix?: string,
+ * subjectTemplate?: SubjectTemplate,
  * requestTimeoutMs?: number,
  * maxRetries?: number
  * }} NatsBusOptions
@@ -106,15 +122,8 @@
 /**
  * @typedef {{
  * nodeId: string,
- * servers?: Array<string>,
- * connectOptions?: import('nats').ConnectionOptions,
  * bus?: any,
- * nats?: any,
- * closeNatsOnClose?: boolean,
- * prefix?: string,
- * requestTimeoutMs?: number,
- * maxRetries?: number,
- * defaultNamespace?: string,
+ * nats?: ClusterNatsOptions,
  * resyncIntervalMs?: number,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null
  * }} CreateClusterSyncOptions
@@ -135,7 +144,6 @@
  * @typedef {{
  * bus: import('./nats-bus.js').NatsBus,
  * nodeId: string,
- * defaultNamespace?: string,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null,
  * resyncIntervalMs?: number
  * }} YjsNatsClusterOptions
