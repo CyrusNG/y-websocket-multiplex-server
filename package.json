@@ -1,6 +1,6 @@
 {
   "name": "y-multiplex-websocket-server",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "multiplex y-websocket",
   "type": "module",
   "sideEffects": false,

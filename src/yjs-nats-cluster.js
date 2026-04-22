@@ -77,14 +77,20 @@ class YjsNatsCluster {
   async bindDoc (namespace, docName, doc, awareness) {
     const ns = namespace
     const docKey = getDocKey(ns, docName)
-    if (this.boundDocs.has(docKey)) {
-      return {
-        namespace: ns,
-        docName,
-        destroy: async () => {
-          await this.unbindDoc(ns, docName)
+    const existing = this.boundDocs.get(docKey)
+    if (existing !== undefined) {
+      if (existing.doc === doc && existing.awareness === awareness) {
+        return {
+          namespace: ns,
+          docName,
+          destroy: async () => {
+            await this.unbindDoc(ns, docName)
+          }
         }
       }
+      existing.unsubs.forEach(unsub => { unsub() })
+      existing.engine.destroy()
+      this.boundDocs.delete(docKey)
     }
 
     /** @type {BoundDocState} */
@@ -190,7 +196,13 @@ class YjsNatsCluster {
         return
       }
       state.ownedAwarenessClientsByNode.delete(nodeId)
-      awarenessProtocol.removeAwarenessStates(state.awareness, Array.from(removed), state.engine.syncCore.remoteOrigin)
+      const removedClients = Array.from(removed)
+      awarenessProtocol.removeAwarenessStates(state.awareness, removedClients, state.engine.syncCore.remoteOrigin)
+      removedClients.forEach(clientID => {
+        if (clientID !== state.doc.clientID) {
+          state.awareness.meta.delete(clientID)
+        }
+      })
     })
   }
 

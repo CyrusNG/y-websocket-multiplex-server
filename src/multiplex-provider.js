@@ -112,6 +112,25 @@ const toArrayBuffer = message => message.buffer.slice(message.byteOffset, messag
 
 const socketManagers = new Map()
 
+/**
+ * @param {Uint8Array} awarenessUpdate
+ * @returns {Array<number>}
+ */
+const getNullStateClients = awarenessUpdate => {
+  const decoder = decoding.createDecoder(awarenessUpdate)
+  const len = decoding.readVarUint(decoder)
+  const removedClients = []
+  for (let i = 0; i < len; i++) {
+    const clientID = decoding.readVarUint(decoder)
+    decoding.readVarUint(decoder) // clock
+    const state = JSON.parse(decoding.readVarString(decoder))
+    if (state === null) {
+      removedClients.push(clientID)
+    }
+  }
+  return removedClients
+}
+
 class MultiplexSocketManager {
   /**
    * @param {string} serverUrl
@@ -140,6 +159,10 @@ class MultiplexSocketManager {
 
   connect () {
     this.shouldConnect = true
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     if (this.ws !== null && (this.ws.readyState === wsReadyStateConnecting || this.ws.readyState === wsReadyStateOpen)) {
       return
     }
@@ -148,6 +171,9 @@ class MultiplexSocketManager {
       : new this.WebSocketPolyfill(this.serverUrl)
     ws.binaryType = 'arraybuffer'
     ws.onopen = () => {
+      if (this.ws !== ws) {
+        return
+      }
       this.reconnectDelay = 1000
       this.getConnectedProviders().forEach(provider => {
         provider.emit('status', [{ status: 'connected' }])
@@ -155,17 +181,27 @@ class MultiplexSocketManager {
       })
     }
     ws.onmessage = event => {
+      if (this.ws !== ws) {
+        return
+      }
       this.handleMessage(event.data)
     }
     ws.onerror = event => {
+      if (this.ws !== ws) {
+        return
+      }
       this.getConnectedProviders().forEach(provider => {
         provider.emit('connection-error', [event, provider])
       })
     }
     ws.onclose = event => {
+      if (this.ws !== ws) {
+        return
+      }
       this.ws = null
       this.getConnectedProviders().forEach(provider => {
         provider.setSynced(false)
+        provider.removeAwarenessStates('remote')
         provider.emit('status', [{ status: 'disconnected' }])
         provider.emit('connection-close', [event, provider])
       })
@@ -279,7 +315,10 @@ class MultiplexSocketManager {
   closeRoute (docName) {
     const ws = this.ws
     if (ws !== null && ws.readyState === wsReadyStateOpen) {
-      ws.send(encodeRouteCloseMessage(docName))
+      const hasOtherConnectedProvider = this.getConnectedProviders().some(provider => provider.docName === docName)
+      if (!hasOtherConnectedProvider) {
+        ws.send(encodeRouteCloseMessage(docName))
+      }
     }
   }
 }
@@ -322,6 +361,7 @@ class MultiplexBinding extends Observable {
     this.resyncInterval = resyncInterval
     this.broadcastChannel = createBroadcastChannelName(this.provider.url, this.docName)
     this.synced = false
+    this.reconnectAwarenessState = null
     this.resyncIntervalId = /** @type {ReturnType<typeof setInterval>|null} */ (null)
     this.bcSubscriber = (
       /** @type {ArrayBuffer | Uint8Array} */ data,
@@ -350,13 +390,21 @@ class MultiplexBinding extends Observable {
       /** @type {{ added: Array<number>, updated: Array<number>, removed: Array<number> }} */ changes,
       /** @type {any} */ origin
     ) => {
-      if (origin !== this && this.awareness !== null) {
+      const awareness = this.awareness
+      if (awareness !== null && changes.removed.length > 0) {
+        changes.removed.forEach(clientID => {
+          if (clientID !== this.doc.clientID) {
+            awareness.meta.delete(clientID)
+          }
+        })
+      }
+      if (origin !== this && awareness !== null) {
         const changedClients = changes.added.concat(changes.updated, changes.removed)
         const encoder = encoding.createEncoder()
         encoding.writeVarUint(encoder, messageAwareness)
         encoding.writeVarUint8Array(
           encoder,
-          awarenessProtocol.encodeAwarenessUpdate(this.awareness, changedClients)
+          awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients)
         )
         const message = encoding.toUint8Array(encoder)
         this.publishMessage(message)
@@ -389,17 +437,26 @@ class MultiplexBinding extends Observable {
   disconnect () {
     this.shouldConnect = false
     this.setSynced(false)
+    if (this.awareness !== null) {
+      const localState = this.awareness.getLocalState()
+      if (localState !== null) {
+        this.reconnectAwarenessState = localState
+        awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], null)
+      }
+    }
+    this.removeAwarenessStates('remote')
     this.provider.wsManager.closeRoute(this.docName)
     this.provider.wsManager.refreshConnectionState()
   }
 
   destroy () {
     this.disconnect()
+    this.reconnectAwarenessState = null
     this.stopResyncInterval()
     if (!this.disableBc) {
       broadcastchannel.unsubscribe(this.broadcastChannel, this.bcSubscriber)
     }
-    this.removeAwarenessStates()
+    this.removeAwarenessStates('all')
     this.doc.off('update', this.docUpdateHandler)
     if (this.awareness !== null) {
       this.awareness.off('update', this.awarenessUpdateHandler)
@@ -413,23 +470,40 @@ class MultiplexBinding extends Observable {
     if (!this.isActive()) {
       return
     }
+    if (this.awareness !== null && this.awareness.getLocalState() === null && this.reconnectAwarenessState !== null) {
+      this.awareness.setLocalState(this.reconnectAwarenessState)
+    }
     const encoder = encoding.createEncoder()
     encoding.writeVarUint(encoder, messageSync)
     syncProtocol.writeSyncStep1(encoder, this.doc)
     this.publishMessage(encoding.toUint8Array(encoder))
-    if (this.awareness !== null) {
-      const awarenessState = this.awareness.getLocalState()
-      if (awarenessState === null) {
-        return
-      }
-      const awarenessEncoder = encoding.createEncoder()
-      encoding.writeVarUint(awarenessEncoder, messageAwareness)
-      encoding.writeVarUint8Array(
-        awarenessEncoder,
-        awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])
-      )
-      this.publishMessage(encoding.toUint8Array(awarenessEncoder))
+    this.publishLocalAwareness('resubscribe')
+  }
+
+  /**
+   * @param {string} reason
+   */
+  publishLocalAwareness (reason) {
+    if (this.awareness === null) {
+      return
     }
+    let awarenessState = this.awareness.getLocalState()
+    if (awarenessState === null) {
+      return
+    }
+    // Refresh local awareness clock so peers can always accept the latest online state.
+    this.awareness.setLocalState(awarenessState)
+    awarenessState = this.awareness.getLocalState()
+    if (awarenessState === null) {
+      return
+    }
+    const awarenessEncoder = encoding.createEncoder()
+    encoding.writeVarUint(awarenessEncoder, messageAwareness)
+    encoding.writeVarUint8Array(
+      awarenessEncoder,
+      awarenessProtocol.encodeAwarenessUpdate(this.awareness, [this.doc.clientID])
+    )
+    this.publishMessage(encoding.toUint8Array(awarenessEncoder))
   }
 
   /**
@@ -442,6 +516,7 @@ class MultiplexBinding extends Observable {
     const messageType = decoding.readVarUint(decoder)
     switch (messageType) {
       case messageSync:
+      {
         encoding.writeVarUint(encoder, messageSync)
         syncProtocol.readSyncMessage(decoder, encoder, this.doc, this)
         if (encoding.length(encoder) > 1) {
@@ -453,15 +528,26 @@ class MultiplexBinding extends Observable {
         }
         this.setSynced(true)
         break
+      }
       case messageAwareness:
-        if (this.awareness !== null) {
+      {
+        const awareness = this.awareness
+        if (awareness !== null) {
+          const awarenessUpdate = decoding.readVarUint8Array(decoder)
+          const nullStateClients = getNullStateClients(awarenessUpdate)
           awarenessProtocol.applyAwarenessUpdate(
-            this.awareness,
-            decoding.readVarUint8Array(decoder),
+            awareness,
+            awarenessUpdate,
             this
           )
+          nullStateClients.forEach(clientID => {
+            if (clientID !== this.doc.clientID) {
+              awareness.meta.delete(clientID)
+            }
+          })
         }
         break
+      }
     }
   }
 
@@ -476,11 +562,30 @@ class MultiplexBinding extends Observable {
     }
   }
 
-  removeAwarenessStates () {
-    if (this.awareness !== null) {
-      const localState = this.awareness.getLocalState()
-      if (localState !== null) {
-        awarenessProtocol.removeAwarenessStates(this.awareness, [this.doc.clientID], this)
+  /**
+   * @param {'local'|'remote'|'all'} [scope]
+   */
+  removeAwarenessStates (scope = 'local') {
+    const awareness = this.awareness
+    if (awareness !== null) {
+      const states = awareness.getStates()
+      if (scope === 'local') {
+        const localState = awareness.getLocalState()
+        if (localState !== null) {
+          awarenessProtocol.removeAwarenessStates(awareness, [this.doc.clientID], this)
+        }
+        return
+      }
+      const clients = Array.from(states.keys()).filter(clientID => scope === 'all' || clientID !== this.doc.clientID)
+      if (clients.length > 0) {
+        awarenessProtocol.removeAwarenessStates(awareness, clients, this)
+        // Keep awareness clocks aligned with removed remote states so a peer
+        // that reconnects with a reset/low clock is not ignored.
+        clients.forEach(clientID => {
+          if (clientID !== this.doc.clientID) {
+            awareness.meta.delete(clientID)
+          }
+        })
       }
     }
   }
@@ -608,6 +713,7 @@ class MultiplexProvider {
     this.shouldConnect = false
     this.bindings.forEach(binding => {
       binding.setSynced(false)
+      binding.removeAwarenessStates('remote')
       binding.emit('status', [{ status: 'disconnected' }])
     })
     this.wsManager.refreshConnectionState()

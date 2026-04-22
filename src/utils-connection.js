@@ -98,7 +98,8 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
       const decoder = decoding.createDecoder(new Uint8Array(message))
       const messageType = decoding.readVarUint(decoder)
       if (messageType === messageRouteClose) {
-        closeRouteConn(decoding.readVarString(decoder))
+        const docName = decoding.readVarString(decoder)
+        closeRouteConn(docName)
         return
       }
       if (messageType !== messageRoute) {

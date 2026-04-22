@@ -155,24 +155,28 @@ class WSSharedDoc extends Y.Doc {
   }
 }
 
-const getOrCreateDoc = (namespace, docname, gc = true) => map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
-  const doc = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
+const getOrCreateDoc = (namespace, docname, gc = true) => {
+  const doc = map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
+    const created = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
+    created.gc = gc
+    if (persistence !== null) {
+      created.whenInitialized = Promise.all([
+        created.whenInitialized,
+        Promise.resolve(persistence.bindState(created.name, created))
+      ]).then(() => undefined)
+    }
+    if (clusterSync !== null) {
+      created.whenInitialized = Promise.all([
+        created.whenInitialized,
+        Promise.resolve(clusterSync.bindDoc(namespace, docname, created, created.awareness))
+      ]).then(() => undefined)
+    }
+    docs.set(created.name, created)
+    return created
+  })
   doc.gc = gc
-  if (persistence !== null) {
-    doc.whenInitialized = Promise.all([
-      doc.whenInitialized,
-      Promise.resolve(persistence.bindState(doc.name, doc))
-    ]).then(() => undefined)
-  }
-  if (clusterSync !== null) {
-    doc.whenInitialized = Promise.all([
-      doc.whenInitialized,
-      Promise.resolve(clusterSync.bindDoc(namespace, docname, doc, doc.awareness))
-    ]).then(() => undefined)
-  }
-  docs.set(doc.name, doc)
   return doc
-})
+}
 
 const getDoc = (namespace, docName) => getOrCreateDoc(namespace, docName)
 
@@ -247,8 +251,17 @@ const messageListener = (conn, doc, message) => {
         }
         break
       case messageAwareness:
-        awarenessProtocol.applyAwarenessUpdate(doc.awareness, decoding.readVarUint8Array(decoder), conn)
+      {
+        const awarenessUpdate = decoding.readVarUint8Array(decoder)
+        const nullStateClients = getNullStateClients(awarenessUpdate)
+        awarenessProtocol.applyAwarenessUpdate(doc.awareness, awarenessUpdate, conn)
+        nullStateClients.forEach(clientID => {
+          if (clientID !== doc.clientID) {
+            doc.awareness.meta.delete(clientID)
+          }
+        })
         break
+      }
     }
   } catch (err) {
     console.error(err)
@@ -263,6 +276,11 @@ const closeConn = (doc, conn) => {
     const controlledIds = /** @type {Set<number>} */ (doc.conns.get(conn))
     doc.conns.delete(conn)
     awarenessProtocol.removeAwarenessStates(doc.awareness, Array.from(controlledIds), null)
+    controlledIds.forEach(clientID => {
+      if (clientID !== doc.clientID) {
+        doc.awareness.meta.delete(clientID)
+      }
+    })
     if (doc.conns.size === 0) {
       cleanupDoc(doc)
     }
@@ -287,6 +305,25 @@ const encodeRouteMessage = (docName, message) => {
   encoding.writeVarString(encoder, docName)
   encoding.writeVarUint8Array(encoder, message)
   return encoding.toUint8Array(encoder)
+}
+
+/**
+ * @param {Uint8Array} awarenessUpdate
+ * @returns {Array<number>}
+ */
+const getNullStateClients = awarenessUpdate => {
+  const decoder = decoding.createDecoder(awarenessUpdate)
+  const len = decoding.readVarUint(decoder)
+  const removedClients = []
+  for (let i = 0; i < len; i++) {
+    const clientID = decoding.readVarUint(decoder)
+    decoding.readVarUint(decoder) // clock
+    const state = JSON.parse(decoding.readVarString(decoder))
+    if (state === null) {
+      removedClients.push(clientID)
+    }
+  }
+  return removedClients
 }
 
 const initializeConnection = async (doc, conn) => {

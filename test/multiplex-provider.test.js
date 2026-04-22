@@ -28,6 +28,23 @@ const waitFor = async (predicate, message, timeoutMs = 3000) => {
 }
 
 /**
+ * @param {() => boolean} predicate
+ * @param {string} message
+ * @param {number} durationMs
+ */
+const expectForDuration = async (predicate, message, durationMs = 1000) => {
+  const start = Date.now()
+  while (Date.now() - start < durationMs) {
+    if (!predicate()) {
+      throw new Error(message)
+    }
+    await new Promise(resolve => setTimeout(resolve, 20))
+  }
+}
+
+const presenceTimeoutMs = 1000
+
+/**
  * @param {string} namespace
  */
 const createTestServer = async (namespace = 'ticket') => {
@@ -98,6 +115,130 @@ const destroyProvider = async provider => {
     ws.terminate()
   }
   await new Promise(resolve => setTimeout(resolve, 20))
+}
+
+/**
+ * @param {import('../src/multiplex-provider.js').MultiplexBinding} binding
+ * @returns {Array<number>}
+ */
+const getAwarenessClients = binding => binding.awareness === null ? [] : Array.from(binding.awareness.getStates().keys())
+
+/**
+ * @param {import('../src/multiplex-provider.js').MultiplexBinding} binding
+ * @param {Y.Doc} docA
+ * @param {Y.Doc} docB
+ * @param {Array<'A'|'B'>} expected
+ * @returns {boolean}
+ */
+const awarenessMatches = (binding, docA, docB, expected) => {
+  const clients = getAwarenessClients(binding)
+  const expectedIds = expected.map(label => label === 'A' ? docA.clientID : docB.clientID)
+  if (clients.length !== expectedIds.length) {
+    return false
+  }
+  return expectedIds.every(id => clients.includes(id))
+}
+
+/**
+ * @param {{
+ *   bindingA: import('../src/multiplex-provider.js').MultiplexBinding,
+ *   bindingB: import('../src/multiplex-provider.js').MultiplexBinding,
+ *   docA: Y.Doc,
+ *   docB: Y.Doc
+ * }} context
+ * @param {Array<'A'|'B'>} expectedA
+ * @param {Array<'A'|'B'>} expectedB
+ * @param {string} message
+ */
+const waitForAwarenessState = async (context, expectedA, expectedB, message) => {
+  const { bindingA, bindingB, docA, docB } = context
+  await waitFor(
+    () => awarenessMatches(bindingA, docA, docB, expectedA) && awarenessMatches(bindingB, docA, docB, expectedB),
+    message,
+    presenceTimeoutMs
+  )
+}
+
+/**
+ * @param {string} step
+ * @param {{
+ *   bindingA: import('../src/multiplex-provider.js').MultiplexBinding,
+ *   bindingB: import('../src/multiplex-provider.js').MultiplexBinding
+ * }} context
+ */
+const applyPresenceStep = async (step, context) => {
+  const { bindingA, bindingB, docA, docB } = context
+  switch (step) {
+    case 'A_DOWN':
+      bindingA.disconnect()
+      await waitFor(() => awarenessMatches(bindingA, docA, docB, []), 'Client A did not become empty after A_DOWN', presenceTimeoutMs)
+      if (bindingB.isActive()) {
+        await waitFor(() => awarenessMatches(bindingB, docA, docB, ['B']), 'Client B did not keep only itself after A_DOWN', presenceTimeoutMs)
+      }
+      break
+    case 'B_DOWN':
+      bindingB.disconnect()
+      await waitFor(() => awarenessMatches(bindingB, docA, docB, []), 'Client B did not become empty after B_DOWN', presenceTimeoutMs)
+      if (bindingA.isActive()) {
+        await waitFor(() => awarenessMatches(bindingA, docA, docB, ['A']), 'Client A did not keep only itself after B_DOWN', presenceTimeoutMs)
+      }
+      break
+    case 'A_UP':
+      bindingA.connect()
+      await waitFor(() => bindingA.synced, 'Client A did not resync after A_UP', presenceTimeoutMs)
+      break
+    case 'B_UP':
+      bindingB.connect()
+      await waitFor(() => bindingB.synced, 'Client B did not resync after B_UP', presenceTimeoutMs)
+      break
+    default:
+      throw new Error(`Unknown presence step: ${step}`)
+  }
+}
+
+/**
+ * @param {{
+ *   steps: Array<string>,
+ *   expectedA: Array<'A'|'B'>,
+ *   expectedB: Array<'A'|'B'>,
+ *   expectationMessage: string
+ * }} scenario
+ */
+const runPresenceScenario = async scenario => {
+  const testServer = await createTestServer()
+  const providerA = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'a' }
+  })
+  const providerB = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'b' }
+  })
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+  const bindingA = providerA.attach('presence-doc', docA, { disableBc: true, awareness: true })
+  const bindingB = providerB.attach('presence-doc', docB, { disableBc: true, awareness: true })
+  try {
+    await waitFor(() => bindingA.synced && bindingB.synced, 'Presence bindings never synced')
+    bindingA.awareness.setLocalStateField('user', 'alice')
+    bindingB.awareness.setLocalStateField('user', 'bob')
+    await waitFor(
+      () => awarenessMatches(bindingA, docA, docB, ['A', 'B']) && awarenessMatches(bindingB, docA, docB, ['A', 'B']),
+      'Initial awareness exchange did not complete',
+      presenceTimeoutMs
+    )
+
+    const context = { bindingA, bindingB, docA, docB }
+    for (const step of scenario.steps) {
+      await applyPresenceStep(step, context)
+    }
+
+    await waitForAwarenessState(context, scenario.expectedA, scenario.expectedB, scenario.expectationMessage)
+  } finally {
+    await destroyProvider(providerA)
+    await destroyProvider(providerB)
+    await testServer.close()
+  }
 }
 
 test('syncs a single routed doc over MultiplexProvider', async () => {
@@ -335,4 +476,259 @@ test('automatically removes docs when the last connection closes', async () => {
     throw new Error('cleanDoc should return false after automatic cleanup removed the doc')
   }
   await testServer.close()
+})
+
+test('keeps routed doc awareness alive when one of multiple shared bindings disconnects', async () => {
+  const testServer = await createTestServer()
+
+  const providerA = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'shared' }
+  })
+  const providerB = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'shared' }
+  })
+  const observerProvider = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'observer' }
+  })
+
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+  const observerDoc = new Y.Doc()
+
+  const bindingA = providerA.attach('presence-doc', docA, { disableBc: true, awareness: true })
+  const bindingB = providerB.attach('presence-doc', docB, { disableBc: true, awareness: true })
+  const observerBinding = observerProvider.attach('presence-doc', observerDoc, { disableBc: true, awareness: true })
+
+  await waitFor(
+    () => bindingA.synced && bindingB.synced && observerBinding.synced,
+    'Shared presence bindings never synced'
+  )
+
+  bindingA.awareness.setLocalStateField('user', 'alice')
+  bindingB.awareness.setLocalStateField('user', 'bob')
+
+  await waitFor(
+    () => observerBinding.awareness.getStates().has(docA.clientID) && observerBinding.awareness.getStates().has(docB.clientID),
+    'Observer never received both shared client awareness states'
+  )
+
+  bindingA.destroy()
+
+  await expectForDuration(
+    () => observerBinding.awareness.getStates().has(docB.clientID),
+    'Disconnecting one shared binding unexpectedly removed the remaining client awareness state',
+    6000
+  )
+
+  await destroyProvider(providerA)
+  await destroyProvider(providerB)
+  await destroyProvider(observerProvider)
+  await testServer.close()
+})
+
+test('clears local awareness view on disconnect while keeping connected peer presence', async () => {
+  const testServer = await createTestServer()
+
+  const providerA = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'a' }
+  })
+  const providerB = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'b' }
+  })
+
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+
+  const bindingA = providerA.attach('presence-doc', docA, { disableBc: true, awareness: true })
+  const bindingB = providerB.attach('presence-doc', docB, { disableBc: true, awareness: true })
+
+  await waitFor(() => bindingA.synced && bindingB.synced, 'Presence bindings never synced')
+
+  bindingA.awareness.setLocalStateField('user', 'alice')
+  bindingB.awareness.setLocalStateField('user', 'bob')
+
+  await waitFor(() => bindingA.awareness.getStates().has(docB.clientID), 'Client A never received client B awareness')
+  await waitFor(() => bindingB.awareness.getStates().has(docA.clientID), 'Client B never received client A awareness')
+
+  bindingA.destroy()
+
+  if (bindingA.awareness.getStates().size !== 0) {
+    throw new Error('Client A awareness should be empty immediately after disconnect')
+  }
+
+  await waitFor(
+    () => bindingB.awareness.getStates().size === 1 && bindingB.awareness.getStates().has(docB.clientID),
+    'Client B awareness should keep only itself after client A disconnects'
+  )
+
+  await destroyProvider(providerA)
+  await destroyProvider(providerB)
+  await testServer.close()
+})
+
+test('restores peer awareness after disconnect and reconnect', async () => {
+  const testServer = await createTestServer()
+
+  const providerA = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'a' }
+  })
+  const providerB = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'b' }
+  })
+
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+
+  const bindingA = providerA.attach('presence-doc', docA, { disableBc: true, awareness: true })
+  const bindingB = providerB.attach('presence-doc', docB, { disableBc: true, awareness: true })
+
+  await waitFor(() => bindingA.synced && bindingB.synced, 'Presence bindings never synced')
+
+  bindingA.awareness.setLocalStateField('user', 'alice')
+  bindingB.awareness.setLocalStateField('user', 'bob')
+
+  await waitFor(
+    () => bindingA.awareness.getStates().has(docB.clientID) && bindingB.awareness.getStates().has(docA.clientID),
+    'Initial awareness exchange did not complete'
+  )
+
+  bindingA.disconnect()
+  await waitFor(
+    () => bindingB.awareness.getStates().size === 1 && bindingB.awareness.getStates().has(docB.clientID),
+    'Client B did not remove client A after disconnect'
+  )
+
+  bindingA.connect()
+  await waitFor(
+    () => bindingA.awareness.getStates().has(docA.clientID) && bindingA.awareness.getStates().has(docB.clientID),
+    'Client A did not restore both awareness states after reconnect'
+  )
+  await waitFor(
+    () => bindingB.awareness.getStates().has(docA.clientID) && bindingB.awareness.getStates().has(docB.clientID),
+    'Client B did not receive client A awareness after reconnect'
+  )
+
+  await destroyProvider(providerA)
+  await destroyProvider(providerB)
+  await testServer.close()
+})
+
+test('restores peer awareness after recreating binding with a new Awareness instance', async () => {
+  const testServer = await createTestServer()
+
+  const providerA = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'a' }
+  })
+  const providerB = new MultiplexProvider(testServer.url, 'ticket', {
+    WebSocketPolyfill: WebSocket,
+    params: { client: 'b' }
+  })
+
+  const docA = new Y.Doc()
+  const docB = new Y.Doc()
+  const awarenessB1 = new awarenessProtocol.Awareness(docB)
+
+  const bindingA = providerA.attach('presence-doc', docA, { disableBc: true, awareness: true })
+  const bindingB1 = providerB.attach('presence-doc', docB, { disableBc: true, awareness: awarenessB1 })
+
+  await waitFor(() => bindingA.synced && bindingB1.synced, 'Presence bindings never synced')
+
+  bindingA.awareness.setLocalStateField('user', 'alice')
+  bindingB1.awareness.setLocalStateField('user', 'bob')
+
+  await waitFor(
+    () => bindingA.awareness.getStates().has(docB.clientID) && bindingB1.awareness.getStates().has(docA.clientID),
+    'Initial awareness exchange did not complete',
+    presenceTimeoutMs
+  )
+
+  // Simulate host-side provider lifecycle: recreate routed binding with a new Awareness.
+  bindingB1.destroy()
+
+  const awarenessB2 = new awarenessProtocol.Awareness(docB)
+  const bindingB2 = providerB.attach('presence-doc', docB, { disableBc: true, awareness: awarenessB2 })
+  awarenessB2.setLocalStateField('user', 'bob-recreated')
+
+  await waitFor(
+    () => bindingA.awareness.getStates().has(docB.clientID) && bindingB2.awareness.getStates().has(docA.clientID),
+    'Client A did not receive client B awareness after binding recreation',
+    presenceTimeoutMs
+  )
+
+  await destroyProvider(providerA)
+  await destroyProvider(providerB)
+  await testServer.close()
+})
+
+const awarenessScenarioCases = [
+  {
+    name: 'A up -> B up keeps both peers visible',
+    steps: [],
+    expectedA: ['A', 'B'],
+    expectedB: ['A', 'B'],
+    expectationMessage: 'Expected both clients to see A and B after both are online'
+  },
+  {
+    name: 'A up -> B up -> A down results in A[] and B[B]',
+    steps: ['A_DOWN'],
+    expectedA: [],
+    expectedB: ['B'],
+    expectationMessage: 'Expected A to be empty and B to keep only itself after A down'
+  },
+  {
+    name: 'A up -> B up -> B down results in A[A] and B[]',
+    steps: ['B_DOWN'],
+    expectedA: ['A'],
+    expectedB: [],
+    expectationMessage: 'Expected A to keep only itself and B to be empty after B down'
+  },
+  {
+    name: 'A up -> B up -> A down -> B down results in A[] and B[]',
+    steps: ['A_DOWN', 'B_DOWN'],
+    expectedA: [],
+    expectedB: [],
+    expectationMessage: 'Expected both clients to be empty after both go down'
+  },
+  {
+    name: 'A up -> B up -> A down -> A up restores A[A,B] and B[A,B]',
+    steps: ['A_DOWN', 'A_UP'],
+    expectedA: ['A', 'B'],
+    expectedB: ['A', 'B'],
+    expectationMessage: 'Expected both clients to see A and B after A reconnects'
+  },
+  {
+    name: 'A up -> B up -> B down -> B up restores A[A,B] and B[A,B]',
+    steps: ['B_DOWN', 'B_UP'],
+    expectedA: ['A', 'B'],
+    expectedB: ['A', 'B'],
+    expectationMessage: 'Expected both clients to see A and B after B reconnects'
+  },
+  {
+    name: 'A up -> B up -> A down -> B down -> A up results in A[A] and B[]',
+    steps: ['A_DOWN', 'B_DOWN', 'A_UP'],
+    expectedA: ['A'],
+    expectedB: [],
+    expectationMessage: 'Expected A to see only itself and B to remain empty when only A reconnects'
+  },
+  {
+    name: 'A up -> B up -> A down -> B down -> B up results in A[] and B[B]',
+    steps: ['A_DOWN', 'B_DOWN', 'B_UP'],
+    expectedA: [],
+    expectedB: ['B'],
+    expectationMessage: 'Expected A to remain empty and B to see only itself when only B reconnects'
+  }
+]
+
+awarenessScenarioCases.forEach(({ name, ...scenario }) => {
+  test(`awareness scenario: ${name}`, async () => {
+    await runPresenceScenario(scenario)
+  })
 })
