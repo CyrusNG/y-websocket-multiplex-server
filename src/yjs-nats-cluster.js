@@ -5,14 +5,22 @@ import { NatsDocTransport } from './nats-doc-transport.js'
 /**
  * @typedef {import('./types.js').YjsNatsClusterOptions} YjsNatsClusterOptions
  * @typedef {import('./types.js').BoundDocState} BoundDocState
+ * @typedef {import('./types.js').ClusterBoundDocRef} ClusterBoundDocRef
+ * @typedef {import('./types.js').OptionalNodeId} OptionalNodeId
+ * @typedef {import('yjs').Doc} YDoc
  */
 
 const ORIGIN_CLUSTER = Symbol('yjs-nats-cluster-origin')
 
+/**
+ * Builds a stable key for one namespaced document.
+ */
 const getDocKey = (namespace, docName) => `${namespace}:${docName}`
 
 class YjsNatsCluster {
   /**
+   * Creates a clustered sync runtime backed by bus transport and per-doc engines.
+   *
    * @param {YjsNatsClusterOptions} opts
    */
   constructor ({
@@ -36,6 +44,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Connects to the bus and starts periodic resync when configured.
+   *
    * @returns {Promise<void>}
    */
   async connect () {
@@ -52,6 +62,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Stops periodic tasks, destroys bound-doc engines, and closes bus resources.
+   *
    * @returns {Promise<void>}
    */
   async close () {
@@ -68,11 +80,13 @@ class YjsNatsCluster {
   }
 
   /**
+   * Binds a document into clustered sync and returns a destroy handle.
+   *
    * @param {string} namespace
    * @param {string} docName
-   * @param {import('yjs').Doc} doc
+   * @param {YDoc} doc
    * @param {awarenessProtocol.Awareness} awareness
-   * @returns {Promise<{ destroy: () => Promise<void>, docName: string, namespace: string }>}
+   * @returns {Promise<ClusterBoundDocRef>}
    */
   async bindDoc (namespace, docName, doc, awareness) {
     const ns = namespace
@@ -146,6 +160,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Unbinds and destroys sync state for one document.
+   *
    * @param {string} namespace
    * @param {string} docName
    * @returns {Promise<void>}
@@ -164,6 +180,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Performs a one-shot resync for one bound document.
+   *
    * @param {string} namespace
    * @param {string} docName
    * @returns {Promise<boolean>}
@@ -187,6 +205,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Removes awareness state owned by a node that just went down.
+   *
    * @param {string} nodeId
    */
   handleNodeDown (nodeId) {
@@ -209,7 +229,7 @@ class YjsNatsCluster {
   /**
    * Pushes the latest node topology snapshot from the host runtime.
    *
-   * @param {string | null | undefined} syncNode
+   * @param {OptionalNodeId} syncNode
    * @param {Array<string>} nodeIds
    */
   setNodes (syncNode, nodeIds) {
@@ -256,6 +276,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Resolves which node to sync from for a given doc.
+   *
    * @param {string} docKey
    * @param {Array<string>} aliveNodes
    * @returns {string | null}
@@ -286,6 +308,8 @@ class YjsNatsCluster {
   }
 
   /**
+   * Tracks ownership of awareness client IDs by node.
+   *
    * @param {BoundDocState} state
    * @param {string} ownerNodeId
    * @param {Array<number>} changedClients

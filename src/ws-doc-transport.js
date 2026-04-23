@@ -2,12 +2,16 @@
  * A minimal DocSyncTransport implementation for websocket server fanout.
  * Inbound sync messages are still handled by the ws sync protocol path.
  */
+
+/**
+ * @typedef {import('./types.js').WsDocTransportOptions} WsDocTransportOptions
+ */
+
 class WsDocTransport {
   /**
-   * @param {{
-   * onPublishUpdate: (update: Uint8Array) => Promise<void> | void,
-   * onPublishAwareness: (awarenessUpdate: Uint8Array, changedClients: Array<number>, origin: any) => Promise<void> | void
-   * }} options
+   * Creates a lightweight transport that fans out updates over websocket connections.
+   *
+   * @param {WsDocTransportOptions} options
    */
   constructor ({ onPublishUpdate, onPublishAwareness }) {
     this.onPublishUpdate = onPublishUpdate
@@ -15,6 +19,8 @@ class WsDocTransport {
   }
 
   /**
+   * No-op subscription hook for API compatibility with clustered transports.
+   *
    * @returns {Promise<() => void>}
    */
   async subscribeDoc () {
@@ -22,6 +28,8 @@ class WsDocTransport {
   }
 
   /**
+   * Forwards a doc update payload to the websocket fanout callback.
+   *
    * @param {string} _docKey
    * @param {string} _senderNodeId
    * @param {Uint8Array} update
@@ -31,6 +39,8 @@ class WsDocTransport {
   }
 
   /**
+   * Forwards an awareness payload to the websocket fanout callback.
+   *
    * @param {string} _docKey
    * @param {string} _senderNodeId
    * @param {Uint8Array} awarenessUpdate
@@ -42,6 +52,8 @@ class WsDocTransport {
   }
 
   /**
+   * Throws because websocket fanout transport does not support pull-based sync requests.
+   *
    * @returns {Promise<Uint8Array>}
    */
   async requestSync () {

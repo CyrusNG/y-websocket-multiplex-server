@@ -7,11 +7,21 @@ import { setupWSConnection } from './utils-connection.js'
 import { setClusterSync } from './utils-docs.js'
 import { setupYdocCluster } from './cluster.js'
 
+/**
+ * @typedef {import('./types.js').WebsocketServerOptions} WebsocketServerOptions
+ */
+
+/**
+ * Parses comma-separated NATS server URLs from an env string.
+ */
 const parseNatsServers = rawValue => rawValue
   .split(',')
   .map(server => server.trim())
   .filter(server => server.length > 0)
 
+/**
+ * Creates and installs cluster sync based on environment variables.
+ */
 const createClusterSyncFromEnv = ({ host, port, env = process.env }) => {
   const natsServers = parseNatsServers(env.NATS_SERVERS || '')
   if (natsServers.length === 0) {
@@ -30,13 +40,9 @@ const createClusterSyncFromEnv = ({ host, port, env = process.env }) => {
 
 class WebsocketServerRuntime {
   /**
-   * @param {{
-   * host?: string,
-   * port?: number,
-   * namespace?: string,
-   * gc?: boolean,
-   * clusterSync?: import('./types.js').ClusterSyncRuntime | null
-   * }} [options]
+   * Creates a websocket server runtime with optional cluster sync integration.
+   *
+   * @param {WebsocketServerOptions} [options]
    */
   constructor (options = {}) {
     const {
@@ -78,6 +84,8 @@ class WebsocketServerRuntime {
   }
 
   /**
+   * Starts listening on configured host and port.
+   *
    * @returns {Promise<void>}
    */
   async listen () {
@@ -89,6 +97,8 @@ class WebsocketServerRuntime {
   }
 
   /**
+   * Closes websocket and HTTP servers.
+   *
    * @returns {Promise<void>}
    */
   async close () {
@@ -100,26 +110,18 @@ class WebsocketServerRuntime {
 }
 
 /**
- * @param {{
- * host?: string,
- * port?: number,
- * namespace?: string,
- * gc?: boolean,
- * clusterSync?: import('./types.js').ClusterSyncRuntime | null
- * }} [options]
+ * Creates a websocket runtime instance without starting it.
+ *
+ * @param {WebsocketServerOptions} [options]
  */
 const createWebsocketServer = (options = {}) => {
   return new WebsocketServerRuntime(options)
 }
 
 /**
- * @param {{
- * host?: string,
- * port?: number,
- * namespace?: string,
- * gc?: boolean,
- * clusterSync?: import('./types.js').ClusterSyncRuntime | null
- * }} [options]
+ * Creates and starts a websocket runtime instance.
+ *
+ * @param {WebsocketServerOptions} [options]
  */
 const startWebsocketServer = async (options = {}) => {
   const runtime = createWebsocketServer(options)
@@ -127,6 +129,9 @@ const startWebsocketServer = async (options = {}) => {
   return runtime
 }
 
+/**
+ * CLI entry point that starts the standalone websocket server process.
+ */
 const runCli = async () => {
   const host = process.env.HOST || 'localhost'
   const port = number.parseInt(process.env.PORT || '1234')

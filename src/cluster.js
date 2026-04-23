@@ -6,6 +6,14 @@ import { setClusterSync } from './utils-docs.js'
 /**
  * @typedef {import('./types.js').CreateClusterSyncOptions} CreateClusterSyncOptions
  * @typedef {import('./types.js').BusMessageMeta} BusMessageMeta
+ * @typedef {import('./types.js').NatsConnectionBusOptions} NatsConnectionBusOptions
+ * @typedef {import('./types.js').BusRequestOptions} BusRequestOptions
+ * @typedef {import('./types.js').BusSubscribeHandler} BusSubscribeHandler
+ * @typedef {import('./types.js').BusHandleHandler} BusHandleHandler
+ * @typedef {import('./types.js').SubscriptionMessageHandler} SubscriptionMessageHandler
+ * @typedef {import('./types.js').OptionalNodeId} OptionalNodeId
+ * @typedef {import('yjs').Doc} YDoc
+ * @typedef {import('@y/protocols/awareness').Awareness} Awareness
  */
 
 /** @type {YDocClusterSyncAdapter|null} */
@@ -13,14 +21,9 @@ let activeYdocCluster = null
 
 class NatsConnectionBus {
   /**
-   * @param {{
-   * nc: any,
-   * nodeId: string,
-   * subjectTemplate?: { broadcast: string, unicast: string },
-   * requestTimeoutMs?: number,
-   * maxRetries?: number,
-   * closeNatsOnClose?: boolean
-   * }} options
+   * Wraps an existing NATS connection with the cluster bus interface.
+   *
+   * @param {NatsConnectionBusOptions} options
    */
   constructor ({
     nc,
@@ -43,11 +46,15 @@ class NatsConnectionBus {
   }
 
   /**
+   * No-op connect for externally managed NATS connections.
+   *
    * @returns {Promise<void>}
    */
   async connect () {}
 
   /**
+   * Closes active subscriptions and optionally closes the shared NATS connection.
+   *
    * @returns {Promise<void>}
    */
   async close () {
@@ -65,6 +72,8 @@ class NatsConnectionBus {
   }
 
   /**
+   * Publishes a payload to a broadcast cluster topic.
+   *
    * @param {string} topic
    * @param {Uint8Array} payload
    * @returns {Promise<void>}
@@ -74,8 +83,10 @@ class NatsConnectionBus {
   }
 
   /**
+   * Subscribes to a broadcast cluster topic.
+   *
    * @param {string} topic
-   * @param {(payload: Uint8Array, meta: BusMessageMeta) => void | Promise<void>} handler
+   * @param {BusSubscribeHandler} handler
    * @returns {Promise<() => void>}
    */
   async subscribe (topic, handler) {
@@ -99,10 +110,12 @@ class NatsConnectionBus {
   }
 
   /**
+   * Sends a request to a target node and retries on failure.
+   *
    * @param {string} targetNodeId
    * @param {string} method
    * @param {Uint8Array} payload
-   * @param {{ timeoutMs?: number, retries?: number }} [opts]
+   * @param {BusRequestOptions} [opts]
    * @returns {Promise<Uint8Array>}
    */
   async request (targetNodeId, method, payload, opts = {}) {
@@ -121,8 +134,10 @@ class NatsConnectionBus {
   }
 
   /**
+   * Registers a request handler for this node on the given method.
+   *
    * @param {string} method
-   * @param {(payload: Uint8Array, meta: BusMessageMeta) => Uint8Array | Promise<Uint8Array>} handler
+   * @param {BusHandleHandler} handler
    * @returns {Promise<() => void>}
    */
   async handle (method, handler) {
@@ -150,8 +165,10 @@ class NatsConnectionBus {
   }
 
   /**
+   * Iterates an async subscription and invokes a handler for each message.
+   *
    * @param {any} sub
-   * @param {(msg: any) => void | Promise<void>} handler
+   * @param {SubscriptionMessageHandler} handler
    */
   async consumeSubscription (sub, handler) {
     try {
@@ -164,6 +181,8 @@ class NatsConnectionBus {
   }
 
   /**
+   * Builds the broadcast subject for a logical topic.
+   *
    * @param {string} topic
    */
   broadcastSubject (topic) {
@@ -171,6 +190,8 @@ class NatsConnectionBus {
   }
 
   /**
+   * Builds the unicast subject for node and method.
+   *
    * @param {string} nodeId
    * @param {string} method
    */
@@ -181,6 +202,8 @@ class NatsConnectionBus {
 
 class YDocClusterSyncAdapter {
   /**
+   * Creates the runtime adapter that wires docs into NATS-backed cluster sync.
+   *
    * @param {CreateClusterSyncOptions} options
    */
   constructor (options) {
@@ -215,6 +238,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Connects cluster resources once and marks adapter as connected.
+   *
    * @returns {Promise<void>}
    */
   async connect () {
@@ -226,6 +251,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Closes cluster resources and marks adapter as disconnected.
+   *
    * @returns {Promise<void>}
    */
   async close () {
@@ -237,10 +264,12 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Binds a document to cluster sync and ensures connectivity first.
+   *
    * @param {string} namespace
    * @param {string} docName
-   * @param {import('yjs').Doc} doc
-   * @param {import('@y/protocols/awareness').Awareness} awareness
+   * @param {YDoc} doc
+   * @param {Awareness} awareness
    * @returns {Promise<any>}
    */
   async bindDoc (namespace, docName, doc, awareness) {
@@ -249,6 +278,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Unbinds a document from cluster sync.
+   *
    * @param {string} namespace
    * @param {string} docName
    * @returns {Promise<void>}
@@ -258,6 +289,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Triggers a one-shot resync for one document.
+   *
    * @param {string} namespace
    * @param {string} docName
    * @returns {Promise<boolean>}
@@ -267,7 +300,9 @@ class YDocClusterSyncAdapter {
   }
 
   /**
-   * @param {string | null | undefined} syncNode
+   * Pushes the latest node topology snapshot to the cluster runtime.
+   *
+   * @param {OptionalNodeId} syncNode
    * @param {Array<string>} nodeIds
    */
   setNodes (syncNode, nodeIds) {
@@ -275,6 +310,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Notifies the runtime that a node has been removed.
+   *
    * @param {string} nodeId
    */
   removeNode (nodeId) {
@@ -282,6 +319,8 @@ class YDocClusterSyncAdapter {
   }
 
   /**
+   * Triggers resync for all bound docs.
+   *
    * @returns {Promise<void>}
    */
   async resyncAllDocs () {
@@ -290,6 +329,8 @@ class YDocClusterSyncAdapter {
 }
 
 /**
+ * Creates and installs a singleton cluster sync adapter.
+ *
  * @param {CreateClusterSyncOptions} options
  * @returns {YDocClusterSyncAdapter}
  */
@@ -301,6 +342,8 @@ const setupYdocCluster = options => {
 }
 
 /**
+ * Returns the currently active singleton cluster sync adapter.
+ *
  * @returns {YDocClusterSyncAdapter|null}
  */
 const getYdocCluster = () => activeYdocCluster

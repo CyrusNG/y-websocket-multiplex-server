@@ -13,6 +13,10 @@ import { setupWSConnection } from '../src/utils-connection.js'
 import { MultiplexProvider } from '../src/multiplex-provider.js'
 
 /**
+ * @typedef {import('../src/multiplex-provider.js').MultiplexBinding} MultiplexBinding
+ */
+
+/**
  * @param {() => boolean} predicate
  * @param {string} message
  * @param {number} timeoutMs
@@ -118,13 +122,13 @@ const destroyProvider = async provider => {
 }
 
 /**
- * @param {import('../src/multiplex-provider.js').MultiplexBinding} binding
+ * @param {MultiplexBinding} binding
  * @returns {Array<number>}
  */
 const getAwarenessClients = binding => binding.awareness === null ? [] : Array.from(binding.awareness.getStates().keys())
 
 /**
- * @param {import('../src/multiplex-provider.js').MultiplexBinding} binding
+ * @param {MultiplexBinding} binding
  * @param {Y.Doc} docA
  * @param {Y.Doc} docB
  * @param {Array<'A'|'B'>} expected
@@ -141,8 +145,8 @@ const awarenessMatches = (binding, docA, docB, expected) => {
 
 /**
  * @param {{
- *   bindingA: import('../src/multiplex-provider.js').MultiplexBinding,
- *   bindingB: import('../src/multiplex-provider.js').MultiplexBinding,
+ *   bindingA: MultiplexBinding,
+ *   bindingB: MultiplexBinding,
  *   docA: Y.Doc,
  *   docB: Y.Doc
  * }} context
@@ -162,8 +166,8 @@ const waitForAwarenessState = async (context, expectedA, expectedB, message) => 
 /**
  * @param {string} step
  * @param {{
- *   bindingA: import('../src/multiplex-provider.js').MultiplexBinding,
- *   bindingB: import('../src/multiplex-provider.js').MultiplexBinding
+ *   bindingA: MultiplexBinding,
+ *   bindingB: MultiplexBinding
  * }} context
  */
 const applyPresenceStep = async (step, context) => {

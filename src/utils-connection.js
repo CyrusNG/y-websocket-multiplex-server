@@ -16,6 +16,9 @@ import {
 
 const pingTimeout = 30000
 
+/**
+ * Installs websocket heartbeat ping/pong checks and closes stale sockets.
+ */
 const setupHeartbeat = conn => {
   let pongReceived = true
   const pingInterval = setInterval(() => {
@@ -55,11 +58,17 @@ const setupHeartbeat = conn => {
   })
 }
 
+/**
+ * Sets up multiplex routing for a single physical websocket connection.
+ */
 const setupMultiplexConnection = (conn, namespace, gc) => {
   /** @type {Map<string, { doc: import('./utils-docs.js').WSSharedDoc, routeConn: any, initialized: Promise<void> }>} */
   const routeConns = new Map()
   connectionDocs.set(conn, routeConns)
 
+  /**
+   * Returns existing per-doc route state or creates it lazily.
+   */
   const getOrCreateRouteConn = docName => {
     const current = routeConns.get(docName)
     if (current !== undefined) {
@@ -85,6 +94,9 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
     return routeState
   }
 
+  /**
+   * Closes and removes one per-doc route connection.
+   */
   const closeRouteConn = docName => {
     const routeState = routeConns.get(docName)
     if (routeState !== undefined) {
@@ -125,6 +137,9 @@ const setupMultiplexConnection = (conn, namespace, gc) => {
   })
 }
 
+/**
+ * Entry point that initializes heartbeat and multiplex routing for a socket.
+ */
 const setupWSConnection = (namespace, conn, req, opts = {}) => {
   const { gc = true } = opts
   conn.binaryType = 'arraybuffer'

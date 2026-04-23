@@ -10,6 +10,16 @@
  * }} SubjectTemplate
  */
 /**
+ * @typedef {Object<string, string>} StringMap
+ */
+/**
+ * @typedef {{
+ * topic: string,
+ * doc: string,
+ * event: string
+ * }} ParsedDocTopic
+ */
+/**
  * @typedef {{
  * connection?: any,
  * connectOptions?: import('nats').ConnectionOptions,
@@ -19,12 +29,62 @@
  * closeNatsOnClose?: boolean
  * }} ClusterNatsOptions
  */
+/**
+ * @typedef {string | null | undefined} OptionalNodeId
+ */
+/**
+ * @typedef {{
+ * subjectTemplate?: SubjectTemplate
+ * }} CreateSubjectFormatterOptions
+ */
 
 /**
  * Provider / Observable
  */
 /**
  * @typedef {(...args: Array<any>) => void} Listener
+ */
+/**
+ * @typedef {{
+ * maxBackoffTime: number,
+ * protocols?: string | Array<string>,
+ * WebSocketPolyfill: typeof WebSocket
+ * }} MultiplexSocketManagerOptions
+ */
+/**
+ * @typedef {{
+ * connect?: boolean,
+ * params?: StringMap,
+ * protocols?: string | Array<string>,
+ * WebSocketPolyfill?: typeof WebSocket,
+ * maxBackoffTime?: number
+ * }} MultiplexProviderOptions
+ */
+/**
+ * @typedef {import('@y/protocols/awareness').Awareness | null} MaybeAwareness
+ */
+/**
+ * @typedef {'local'|'remote'|'all'} AwarenessRemovalScope
+ */
+/**
+ * @typedef {Uint8Array | ArrayBuffer | Blob | string} SocketMessageData
+ */
+/**
+ * @typedef {WebSocket | null} MaybeWebSocket
+ */
+/**
+ * @typedef {{
+ * awareness?: boolean | MaybeAwareness,
+ * connect?: boolean,
+ * disableBc?: boolean,
+ * resyncInterval?: number
+ * }} MultiplexAttachOptions
+ */
+/**
+ * @typedef {{
+ * room: string,
+ * data: Record<string, { type: string, content: any }>
+ * }} CallbackData
  */
 
 /**
@@ -69,21 +129,54 @@
  * retries?: number
  * }} BusRequestOptions
  */
+/**
+ * @typedef {(payload: Uint8Array, meta: BusMessageMeta) => void | Promise<void>} BusSubscribeHandler
+ */
+/**
+ * @typedef {(payload: Uint8Array, meta: BusMessageMeta) => Uint8Array | Promise<Uint8Array>} BusHandleHandler
+ */
+/**
+ * @typedef {(msg: any) => void | Promise<void>} SubscriptionMessageHandler
+ */
+/**
+ * @typedef {{
+ * nc: any,
+ * nodeId: string,
+ * subjectTemplate?: SubjectTemplate,
+ * requestTimeoutMs?: number,
+ * maxRetries?: number,
+ * closeNatsOnClose?: boolean
+ * }} NatsConnectionBusOptions
+ */
 
 /**
  * Doc Sync Transport / Engine
  */
 /**
  * @typedef {{
- * subscribeDoc: (docKey: string, handlers: {
- *   onUpdate: (senderNodeId: string, update: Uint8Array) => void,
- *   onAwareness: (senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void,
- *   onSyncRequest: (requesterNodeId: string, stateVector: Uint8Array) => Uint8Array
- * }) => Promise<() => void>,
+ * onUpdate: (senderNodeId: string, update: Uint8Array) => void,
+ * onAwareness: (senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void,
+ * onSyncRequest: (requesterNodeId: string, stateVector: Uint8Array) => Uint8Array
+ * }} DocSubscribeHandlers
+ */
+/**
+ * @typedef {{
+ * subscribeDoc: (docKey: string, handlers: DocSubscribeHandlers) => Promise<() => void>,
  * publishUpdate: (docKey: string, senderNodeId: string, update: Uint8Array, origin?: any) => Promise<void>,
  * publishAwareness: (docKey: string, senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>, origin?: any) => Promise<void>,
  * requestSync: (docKey: string, targetNodeId: string, requesterNodeId: string, stateVector: Uint8Array) => Promise<Uint8Array>
  * }} DocSyncTransport
+ */
+/**
+ * @typedef {{
+ * bus: import('./nats-bus.js').NatsBus
+ * }} NatsDocTransportOptions
+ */
+/**
+ * @typedef {{
+ * onPublishUpdate: (update: Uint8Array) => Promise<void> | void,
+ * onPublishAwareness: (awarenessUpdate: Uint8Array, changedClients: Array<number>, origin: any) => Promise<void> | void
+ * }} WsDocTransportOptions
  */
 /**
  * @typedef {{
@@ -99,6 +192,13 @@
 
 /**
  * Cluster Adapter / Cluster Runtime
+ */
+/**
+ * @typedef {{
+ * destroy: () => Promise<void>,
+ * docName: string,
+ * namespace: string
+ * }} ClusterBoundDocRef
  */
 /**
  * @typedef {{
@@ -127,6 +227,15 @@
  * resyncIntervalMs?: number,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null
  * }} CreateClusterSyncOptions
+ */
+/**
+ * @typedef {{
+ * host?: string,
+ * port?: number,
+ * namespace?: string,
+ * gc?: boolean,
+ * clusterSync?: ClusterSyncRuntime | null
+ * }} WebsocketServerOptions
  */
 /**
  * @typedef {{

@@ -5,10 +5,15 @@ import { createYDocSyncCore } from './sync-core.js'
  * @typedef {import('./types.js').DocSyncEngineOptions} DocSyncEngineOptions
  */
 
+/**
+ * Deduplicates a number array while preserving insertion order.
+ */
 const uniqueNumbers = values => Array.from(new Set(values))
 
 class DocSyncEngine {
   /**
+   * Creates a sync engine that bridges local doc events and transport messages.
+   *
    * @param {DocSyncEngineOptions} options
    */
   constructor ({
@@ -54,6 +59,8 @@ class DocSyncEngine {
   }
 
   /**
+   * Connects transport subscriptions for remote updates and sync requests.
+   *
    * @returns {Promise<void>}
    */
   async connect () {
@@ -79,6 +86,8 @@ class DocSyncEngine {
   }
 
   /**
+   * Performs an on-demand resync from a specific target node.
+   *
    * @param {string} targetNodeId
    * @returns {Promise<void>}
    */
@@ -88,6 +97,9 @@ class DocSyncEngine {
     this.syncCore.applyRemoteUpdate(diff)
   }
 
+  /**
+   * Tears down transport subscriptions and local sync listeners.
+   */
   destroy () {
     if (this.unsubscribeTransport !== null) {
       this.unsubscribeTransport()

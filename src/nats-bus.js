@@ -5,6 +5,9 @@ import { createSubjectFormatter } from './nats-subject.js'
  * @typedef {import('./types.js').NatsBusOptions} NatsBusOptions
  * @typedef {import('./types.js').BusMessageMeta} BusMessageMeta
  * @typedef {import('./types.js').BusRequestOptions} BusRequestOptions
+ * @typedef {import('./types.js').BusSubscribeHandler} BusSubscribeHandler
+ * @typedef {import('./types.js').BusHandleHandler} BusHandleHandler
+ * @typedef {import('./types.js').SubscriptionMessageHandler} SubscriptionMessageHandler
  */
 
 const noopUnsub = () => {}
@@ -13,12 +16,16 @@ const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
 /**
+ * Encodes a UTF-8 string to a Uint8Array payload.
+ *
  * @param {string} message
  * @returns {Uint8Array}
  */
 const encodeText = message => textEncoder.encode(message)
 
 /**
+ * Decodes a UTF-8 payload to a string.
+ *
  * @param {Uint8Array} payload
  * @returns {string}
  */
@@ -26,6 +33,8 @@ const decodeText = payload => textDecoder.decode(payload)
 
 class NatsBus {
   /**
+   * Creates a NATS message bus abstraction used by cluster sync modules.
+   *
    * @param {NatsBusOptions} opts
    */
   constructor ({
@@ -51,6 +60,8 @@ class NatsBus {
   }
 
   /**
+   * Opens the NATS connection if it is not already connected.
+   *
    * @returns {Promise<void>}
    */
   async connect () {
@@ -67,6 +78,8 @@ class NatsBus {
   }
 
   /**
+   * Closes all subscriptions and the underlying NATS connection.
+   *
    * @returns {Promise<void>}
    */
   async close () {
@@ -85,6 +98,8 @@ class NatsBus {
   }
 
   /**
+   * Publishes a payload to a logical broadcast topic.
+   *
    * @param {string} topic
    * @param {Uint8Array} payload
    * @returns {Promise<void>}
@@ -95,8 +110,10 @@ class NatsBus {
   }
 
   /**
+   * Subscribes to a logical broadcast topic.
+   *
    * @param {string} topic
-   * @param {(payload: Uint8Array, meta: BusMessageMeta) => void | Promise<void>} handler
+   * @param {BusSubscribeHandler} handler
    * @returns {Promise<() => void>}
    */
   async subscribe (topic, handler) {
@@ -121,6 +138,8 @@ class NatsBus {
   }
 
   /**
+   * Sends a request payload to a target node and waits for a response.
+   *
    * @param {string} targetNodeId
    * @param {string} method
    * @param {Uint8Array} payload
@@ -144,8 +163,10 @@ class NatsBus {
   }
 
   /**
+   * Registers a request handler on this node for a given method.
+   *
    * @param {string} method
-   * @param {(payload: Uint8Array, meta: BusMessageMeta) => Uint8Array | Promise<Uint8Array>} handler
+   * @param {BusHandleHandler} handler
    * @returns {Promise<() => void>}
    */
   async handle (method, handler) {
@@ -175,8 +196,10 @@ class NatsBus {
   }
 
   /**
+   * Consumes async subscription messages and dispatches each one to the handler.
+   *
    * @param {any} sub
-   * @param {(msg: any) => void | Promise<void>} handler
+   * @param {SubscriptionMessageHandler} handler
    */
   async consumeSubscription (sub, handler) {
     try {
@@ -189,6 +212,8 @@ class NatsBus {
   }
 
   /**
+   * Returns the active NATS connection or throws when disconnected.
+   *
    * @returns {any}
    */
   assertConnection () {
@@ -199,6 +224,8 @@ class NatsBus {
   }
 
   /**
+   * Resolves a broadcast subject name for the given logical topic.
+   *
    * @param {string} topic
    */
   broadcastSubject (topic) {
@@ -206,6 +233,8 @@ class NatsBus {
   }
 
   /**
+   * Resolves a unicast subject name for node and method values.
+   *
    * @param {string} nodeId
    * @param {string} method
    */

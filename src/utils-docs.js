@@ -44,8 +44,14 @@ const messageAwareness = 1
 const messageRoute = 2
 const messageRouteClose = 3
 
+/**
+ * Builds a stable map key for one namespaced document.
+ */
 const createDocKey = (namespace, docName) => `${namespace}:${docName}`
 
+/**
+ * Derives namespace from request URL path.
+ */
 const getRequestNamespace = req => {
   const url = new URL(req.url || '/', 'http://localhost')
   return url.pathname.replace(/^\/+|\/+$/g, '')
@@ -54,12 +60,21 @@ const getRequestNamespace = req => {
 /** @type {(ydoc: Y.Doc) => Promise<void>} */
 let contentInitializor = _ydoc => Promise.resolve()
 
+/**
+ * Installs persistence adapter after validation/normalization.
+ */
 const setPersistence = persistence_ => {
   persistence = normalizePersistence(persistence_)
 }
 
+/**
+ * Returns the active persistence adapter.
+ */
 const getPersistence = () => persistence
 
+/**
+ * Installs cluster-sync runtime and triggers best-effort connect.
+ */
 const setClusterSync = clusterSync_ => {
   clusterSync = clusterSync_
   if (clusterSync !== null && typeof clusterSync.connect === 'function') {
@@ -69,9 +84,16 @@ const setClusterSync = clusterSync_ => {
   }
 }
 
+/**
+ * Returns the active cluster-sync runtime.
+ */
 const getClusterSync = () => clusterSync
 
-/** @param {PersistenceAdapter|null} persistence_ */
+/**
+ * Validates persistence adapter shape and returns normalized adapter/null.
+ *
+ * @param {PersistenceAdapter|null} persistence_
+ */
 const normalizePersistence = persistence_ => {
   if (persistence_ == null) {
     return null
@@ -82,11 +104,17 @@ const normalizePersistence = persistence_ => {
   throw new Error('Invalid persistence: expected { bindState, unbindState }')
 }
 
+/**
+ * Sets content initialization hook for newly created docs.
+ */
 const setContentInitializor = f => {
   contentInitializor = f
 }
 
 class WSSharedDoc extends Y.Doc {
+  /**
+   * Creates a shared Yjs doc with awareness and websocket transport sync.
+   */
   constructor (name, namespace, docName) {
     super({ gc: gcEnabled })
     this.name = name
@@ -149,12 +177,18 @@ class WSSharedDoc extends Y.Doc {
     this.whenInitialized = contentInitializor(this)
   }
 
+  /**
+   * Cleans up sync engine resources before destroying the doc.
+   */
   destroy () {
     this.syncEngine.destroy()
     super.destroy()
   }
 }
 
+/**
+ * Returns an existing shared doc or creates and initializes a new one.
+ */
 const getOrCreateDoc = (namespace, docname, gc = true) => {
   const doc = map.setIfUndefined(docs, createDocKey(namespace, docname), () => {
     const created = new WSSharedDoc(createDocKey(namespace, docname), namespace, docname)
@@ -178,13 +212,22 @@ const getOrCreateDoc = (namespace, docname, gc = true) => {
   return doc
 }
 
+/**
+ * Returns a shared doc for namespace/doc name.
+ */
 const getDoc = (namespace, docName) => getOrCreateDoc(namespace, docName)
 
+/**
+ * Returns docs currently associated with one websocket connection.
+ */
 const getDocsForConnection = conn => {
   const routeConns = connectionDocs.get(conn)
   return routeConns === undefined ? [] : Array.from(routeConns.values(), ({ doc }) => doc)
 }
 
+/**
+ * Returns physical websocket connections currently serving one doc.
+ */
 const getConnectionsForDoc = (namespace, docName) => {
   const doc = docs.get(createDocKey(namespace, docName))
   return doc === undefined
@@ -192,6 +235,9 @@ const getConnectionsForDoc = (namespace, docName) => {
     : Array.from(new Set(Array.from(doc.conns.keys(), conn => conn.ws || conn)))
 }
 
+/**
+ * Removes one doc from registries and runs async unbind cleanup.
+ */
 const cleanupDoc = doc => {
   if (docsBeingRemoved.has(doc.name)) {
     return
@@ -222,6 +268,9 @@ const cleanupDoc = doc => {
   unbindCluster.finally(cleanup)
 }
 
+/**
+ * Cleans one document by name and closes active connections if needed.
+ */
 const cleanDoc = (namespace, docName) => {
   const doc = docs.get(createDocKey(namespace, docName))
   if (doc === undefined) {
@@ -237,6 +286,9 @@ const cleanDoc = (namespace, docName) => {
   return true
 }
 
+/**
+ * Handles one incoming sync/awareness message for a doc connection.
+ */
 const messageListener = (conn, doc, message) => {
   try {
     const encoder = encoding.createEncoder()
@@ -270,6 +322,9 @@ const messageListener = (conn, doc, message) => {
   }
 }
 
+/**
+ * Closes a doc connection and removes awareness states owned by it.
+ */
 const closeConn = (doc, conn) => {
   if (doc.conns.has(conn)) {
     // @ts-ignore
@@ -288,6 +343,9 @@ const closeConn = (doc, conn) => {
   conn.close()
 }
 
+/**
+ * Sends a message if connection is open; otherwise closes the route.
+ */
 const send = (doc, conn, message) => {
   if (conn.readyState !== wsReadyStateConnecting && conn.readyState !== wsReadyStateOpen) {
     closeConn(doc, conn)
@@ -299,6 +357,9 @@ const send = (doc, conn, message) => {
   }
 }
 
+/**
+ * Encodes a multiplex route wrapper around a doc message payload.
+ */
 const encodeRouteMessage = (docName, message) => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, messageRoute)
@@ -308,6 +369,8 @@ const encodeRouteMessage = (docName, message) => {
 }
 
 /**
+ * Extracts client IDs that carry null awareness states.
+ *
  * @param {Uint8Array} awarenessUpdate
  * @returns {Array<number>}
  */
@@ -326,6 +389,9 @@ const getNullStateClients = awarenessUpdate => {
   return removedClients
 }
 
+/**
+ * Finishes a new connection handshake by sending sync step1 and awareness.
+ */
 const initializeConnection = async (doc, conn) => {
   try {
     await doc.whenInitialized

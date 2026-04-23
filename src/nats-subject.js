@@ -1,10 +1,22 @@
 const TOPIC_PARTS = new Set(['update', 'awareness'])
 
+/**
+ * @typedef {import('./types.js').SubjectTemplate} SubjectTemplate
+ * @typedef {import('./types.js').ParsedDocTopic} ParsedDocTopic
+ * @typedef {import('./types.js').CreateSubjectFormatterOptions} CreateSubjectFormatterOptions
+ */
+
+/**
+ * Extracts placeholder token names from a subject template string.
+ */
 const extractTemplateTokens = template => {
   const matches = template.match(/\{[a-zA-Z0-9_]+\}/g) || []
   return matches.map(token => token.slice(1, -1))
 }
 
+/**
+ * Ensures a subject template contains required tokens and no unknown tokens.
+ */
 const validateTemplateTokens = ({ template, allowed, required, templateName }) => {
   const tokens = extractTemplateTokens(template)
   const unknown = tokens.filter(token => !allowed.has(token))
@@ -19,7 +31,9 @@ const validateTemplateTokens = ({ template, allowed, required, templateName }) =
 }
 
 /**
- * @param {{ broadcast: string, unicast: string }} subjectTemplate
+ * Validates and normalizes a subject template configuration.
+ *
+ * @param {SubjectTemplate} subjectTemplate
  */
 const validateSubjectTemplate = subjectTemplate => {
   if (subjectTemplate == null || typeof subjectTemplate !== 'object') {
@@ -55,6 +69,8 @@ const validateSubjectTemplate = subjectTemplate => {
 }
 
 /**
+ * Renders a template string with the given token values.
+ *
  * @param {string} template
  * @param {Record<string, string>} values
  */
@@ -63,8 +79,10 @@ const renderTemplate = (template, values) => template.replace(/\{([a-zA-Z0-9_]+)
 })
 
 /**
+ * Parses a doc topic into namespace/doc/event segments.
+ *
  * @param {string} topic
- * @returns {{ topic: string, doc: string, event: string } | null}
+ * @returns {ParsedDocTopic | null}
  */
 const parseDocTopic = topic => {
   if (!topic.startsWith('doc.')) {
@@ -92,7 +110,9 @@ const parseDocTopic = topic => {
 }
 
 /**
- * @param {{ subjectTemplate?: { broadcast: string, unicast: string } }} options
+ * Creates helpers for generating broadcast and unicast subjects.
+ *
+ * @param {CreateSubjectFormatterOptions} options
  */
 const createSubjectFormatter = ({ subjectTemplate }) => {
   const template = subjectTemplate === undefined
@@ -101,6 +121,8 @@ const createSubjectFormatter = ({ subjectTemplate }) => {
 
   return {
     /**
+     * Converts a logical topic name to a broadcast subject.
+     *
      * @param {string} topic
      */
     broadcastSubject (topic) {
@@ -123,6 +145,8 @@ const createSubjectFormatter = ({ subjectTemplate }) => {
     },
 
     /**
+     * Converts node and method values to a unicast subject.
+     *
      * @param {string} nodeId
      * @param {string} method
      */

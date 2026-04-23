@@ -12,6 +12,8 @@ import * as decoding from 'lib0/decoding'
  */
 class YDocSyncCore {
   /**
+   * Creates a transport-agnostic sync core around a doc and awareness instance.
+   *
    * @param {CreateYDocSyncCoreOptions} options
    */
   constructor ({
@@ -50,6 +52,8 @@ class YDocSyncCore {
   }
 
   /**
+   * Applies a remote Yjs document update with remote-origin tagging.
+   *
    * @param {Uint8Array} update
    */
   applyRemoteUpdate (update) {
@@ -57,6 +61,8 @@ class YDocSyncCore {
   }
 
   /**
+   * Applies a remote awareness update and cleans stale awareness metadata.
+   *
    * @param {Uint8Array} awarenessUpdate
    */
   applyRemoteAwarenessUpdate (awarenessUpdate) {
@@ -70,6 +76,8 @@ class YDocSyncCore {
   }
 
   /**
+   * Encodes the current document state vector for sync negotiation.
+   *
    * @returns {Uint8Array}
    */
   encodeStateVector () {
@@ -77,6 +85,8 @@ class YDocSyncCore {
   }
 
   /**
+   * Encodes the local state as an update relative to a remote state vector.
+   *
    * @param {Uint8Array} stateVector
    * @returns {Uint8Array}
    */
@@ -84,6 +94,9 @@ class YDocSyncCore {
     return Y.encodeStateAsUpdate(this.doc, stateVector)
   }
 
+  /**
+   * Removes local event listeners and releases sync-core resources.
+   */
   destroy () {
     this.doc.off('update', this.handleDocUpdate)
     this.awareness.off('update', this.handleAwarenessUpdate)
@@ -91,6 +104,8 @@ class YDocSyncCore {
 }
 
 /**
+ * Extracts client IDs that carry null awareness states.
+ *
  * @param {Uint8Array} awarenessUpdate
  * @returns {Array<number>}
  */
@@ -110,6 +125,8 @@ const getNullStateClients = awarenessUpdate => {
 }
 
 /**
+ * Factory helper for creating a YDocSyncCore instance.
+ *
  * @param {CreateYDocSyncCoreOptions} options
  */
 const createYDocSyncCore = options => {

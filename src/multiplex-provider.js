@@ -6,6 +6,17 @@ import * as broadcastchannel from 'lib0/broadcastchannel'
 
 /**
  * @typedef {import('./types.js').Listener} Listener
+ * @typedef {import('./types.js').AwarenessChanges} AwarenessChanges
+ * @typedef {import('./types.js').MultiplexSocketManagerOptions} MultiplexSocketManagerOptions
+ * @typedef {import('./types.js').MultiplexProviderOptions} MultiplexProviderOptions
+ * @typedef {import('./types.js').MultiplexAttachOptions} MultiplexAttachOptions
+ * @typedef {import('./types.js').StringMap} StringMap
+ * @typedef {import('./types.js').SocketMessageData} SocketMessageData
+ * @typedef {import('./types.js').MaybeAwareness} MaybeAwareness
+ * @typedef {import('./types.js').AwarenessRemovalScope} AwarenessRemovalScope
+ * @typedef {import('./types.js').MaybeWebSocket} MaybeWebSocket
+ * @typedef {import('yjs').Doc} YDoc
+ * @typedef {string | MultiplexBinding} DocNameOrBinding
  */
 
 const messageSync = 0
@@ -17,6 +28,9 @@ const wsReadyStateConnecting = 0
 const wsReadyStateOpen = 1
 
 class Observable {
+  /**
+   * Creates a tiny event emitter for provider lifecycle events.
+   */
   constructor () {
     /**
      * @type {Map<string, Set<Listener>>}
@@ -25,6 +39,8 @@ class Observable {
   }
 
   /**
+   * Registers a listener for an event.
+   *
    * @param {string} eventName
    * @param {Listener} listener
    */
@@ -35,6 +51,8 @@ class Observable {
   }
 
   /**
+   * Removes a listener from an event.
+   *
    * @param {string} eventName
    * @param {Listener} listener
    */
@@ -49,6 +67,8 @@ class Observable {
   }
 
   /**
+   * Emits an event with positional arguments.
+   *
    * @param {string} eventName
    * @param {Array<any>} args
    */
@@ -63,9 +83,11 @@ class Observable {
 }
 
 /**
+ * Builds the multiplex websocket URL for one namespace and query set.
+ *
  * @param {string} serverUrl
  * @param {string} namespace
- * @param {Object<string, string>} params
+ * @param {StringMap} params
  */
 const createProviderUrl = (serverUrl, namespace, params) => {
   const normalizedServerUrl = serverUrl.endsWith('/') ? serverUrl : `${serverUrl}/`
@@ -78,6 +100,8 @@ const createProviderUrl = (serverUrl, namespace, params) => {
 }
 
 /**
+ * Encodes a routed websocket payload for a target doc name.
+ *
  * @param {string} docName
  * @param {Uint8Array} message
  */
@@ -90,6 +114,8 @@ const encodeRouteMessage = (docName, message) => {
 }
 
 /**
+ * Encodes a route-close control message for a target doc name.
+ *
  * @param {string} docName
  */
 const encodeRouteCloseMessage = docName => {
@@ -100,19 +126,29 @@ const encodeRouteCloseMessage = docName => {
 }
 
 /**
+ * Builds a broadcast-channel key for a provider/doc pair.
+ *
  * @param {string} providerUrl
  * @param {string} docName
  */
 const createBroadcastChannelName = (providerUrl, docName) => `${providerUrl}#${docName}`
 
 /**
+ * Copies a Uint8Array into a plain ArrayBuffer.
+ *
  * @param {Uint8Array} message
  */
-const toArrayBuffer = message => message.buffer.slice(message.byteOffset, message.byteOffset + message.byteLength)
+const toArrayBuffer = message => {
+  const bytes = new Uint8Array(message.byteLength)
+  bytes.set(message)
+  return bytes.buffer
+}
 
 const socketManagers = new Map()
 
 /**
+ * Extracts client IDs that carry null awareness state payloads.
+ *
  * @param {Uint8Array} awarenessUpdate
  * @returns {Array<number>}
  */
@@ -133,11 +169,10 @@ const getNullStateClients = awarenessUpdate => {
 
 class MultiplexSocketManager {
   /**
+   * Creates the shared physical websocket manager for a provider URL.
+   *
    * @param {string} serverUrl
-   * @param {Object} options
-   * @param {number} options.maxBackoffTime
-   * @param {string | Array<string> | undefined} options.protocols
-   * @param {typeof WebSocket} options.WebSocketPolyfill
+   * @param {MultiplexSocketManagerOptions} options
    */
   constructor (serverUrl, { maxBackoffTime, protocols, WebSocketPolyfill }) {
     this.serverUrl = serverUrl
@@ -157,6 +192,9 @@ class MultiplexSocketManager {
     this.reconnectTimer = /** @type {ReturnType<typeof setTimeout>|null} */ (null)
   }
 
+  /**
+   * Opens or reuses a websocket connection and attaches socket handlers.
+   */
   connect () {
     this.shouldConnect = true
     if (this.reconnectTimer !== null) {
@@ -212,6 +250,9 @@ class MultiplexSocketManager {
     this.ws = ws
   }
 
+  /**
+   * Schedules an exponential-backoff reconnect attempt.
+   */
   scheduleReconnect () {
     if (this.reconnectTimer !== null) {
       return
@@ -223,6 +264,9 @@ class MultiplexSocketManager {
     this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxBackoffTime)
   }
 
+  /**
+   * Syncs physical websocket state with active logical bindings.
+   */
   refreshConnectionState () {
     const hasConnectedProviders = this.getConnectedProviders().length > 0
     this.shouldConnect = hasConnectedProviders
@@ -240,6 +284,9 @@ class MultiplexSocketManager {
     }
   }
 
+  /**
+   * Disposes the manager when no bindings remain.
+   */
   disconnectIfUnused () {
     if (this.providers.size === 0) {
       this.shouldConnect = false
@@ -256,6 +303,8 @@ class MultiplexSocketManager {
   }
 
   /**
+   * Registers a binding on this shared websocket manager.
+   *
    * @param {MultiplexBinding} provider
    */
   addProvider (provider) {
@@ -264,6 +313,8 @@ class MultiplexSocketManager {
   }
 
   /**
+   * Unregisters a binding from this shared websocket manager.
+   *
    * @param {MultiplexBinding} provider
    */
   removeProvider (provider) {
@@ -274,12 +325,17 @@ class MultiplexSocketManager {
     }
   }
 
+  /**
+   * Returns bindings that currently expect an active connection.
+   */
   getConnectedProviders () {
     return Array.from(this.providers).filter(provider => provider.isActive())
   }
 
   /**
-   * @param {Uint8Array | ArrayBuffer | Blob | string} data
+   * Decodes one socket frame and routes doc payloads to matching bindings.
+   *
+   * @param {SocketMessageData} data
    */
   handleMessage (data) {
     if (typeof data === 'string' || data instanceof Blob) {
@@ -299,17 +355,21 @@ class MultiplexSocketManager {
   }
 
   /**
+   * Sends a routed message to the server for one doc binding.
+   *
    * @param {string} docName
    * @param {Uint8Array} message
    */
   sendRouteMessage (docName, message) {
     const ws = this.ws
     if (ws !== null && ws.readyState === wsReadyStateOpen) {
-      ws.send(encodeRouteMessage(docName, message))
+      ws.send(toArrayBuffer(encodeRouteMessage(docName, message)))
     }
   }
 
   /**
+   * Sends a route-close control frame when no active binding uses the doc.
+   *
    * @param {string} docName
    */
   closeRoute (docName) {
@@ -317,18 +377,17 @@ class MultiplexSocketManager {
     if (ws !== null && ws.readyState === wsReadyStateOpen) {
       const hasOtherConnectedProvider = this.getConnectedProviders().some(provider => provider.docName === docName)
       if (!hasOtherConnectedProvider) {
-        ws.send(encodeRouteCloseMessage(docName))
+        ws.send(toArrayBuffer(encodeRouteCloseMessage(docName)))
       }
     }
   }
 }
 
 /**
+ * Returns a cached socket manager (or creates one) for a provider URL.
+ *
  * @param {string} serverUrl
- * @param {Object} options
- * @param {number} options.maxBackoffTime
- * @param {string | Array<string> | undefined} options.protocols
- * @param {typeof WebSocket} options.WebSocketPolyfill
+ * @param {MultiplexSocketManagerOptions} options
  */
 const getSocketManager = (serverUrl, options) => {
   const existing = socketManagers.get(serverUrl)
@@ -342,10 +401,12 @@ const getSocketManager = (serverUrl, options) => {
 
 class MultiplexBinding extends Observable {
   /**
+   * Creates one logical doc binding over the shared provider websocket.
+   *
    * @param {MultiplexProvider} provider
    * @param {string} docName
-   * @param {import('yjs').Doc} doc
-   * @param {awarenessProtocol.Awareness | null} awareness
+   * @param {YDoc} doc
+   * @param {MaybeAwareness} awareness
    * @param {boolean} connect
    * @param {boolean} disableBc
    * @param {number} resyncInterval
@@ -387,7 +448,7 @@ class MultiplexBinding extends Observable {
     }
 
     this.awarenessUpdateHandler = (
-      /** @type {{ added: Array<number>, updated: Array<number>, removed: Array<number> }} */ changes,
+      /** @type {AwarenessChanges} */ changes,
       /** @type {any} */ origin
     ) => {
       const awareness = this.awareness
@@ -421,10 +482,16 @@ class MultiplexBinding extends Observable {
     this.startResyncInterval()
   }
 
+  /**
+   * Returns whether this binding should currently participate in sync.
+   */
   isActive () {
     return this.provider.shouldConnect && this.shouldConnect
   }
 
+  /**
+   * Enables this binding and resubscribes if websocket is already open.
+   */
   connect () {
     this.shouldConnect = true
     this.provider.wsManager.refreshConnectionState()
@@ -434,6 +501,9 @@ class MultiplexBinding extends Observable {
     }
   }
 
+  /**
+   * Disables this binding and removes remote awareness state.
+   */
   disconnect () {
     this.shouldConnect = false
     this.setSynced(false)
@@ -449,6 +519,9 @@ class MultiplexBinding extends Observable {
     this.provider.wsManager.refreshConnectionState()
   }
 
+  /**
+   * Fully tears down this binding and detaches all listeners/resources.
+   */
   destroy () {
     this.disconnect()
     this.reconnectAwarenessState = null
@@ -466,6 +539,9 @@ class MultiplexBinding extends Observable {
     super.emit('destroy', [this])
   }
 
+  /**
+   * Sends sync step1 and local awareness state to resubscribe this binding.
+   */
   resubscribe () {
     if (!this.isActive()) {
       return
@@ -481,6 +557,8 @@ class MultiplexBinding extends Observable {
   }
 
   /**
+   * Publishes current local awareness state with a fresh awareness clock.
+   *
    * @param {string} reason
    */
   publishLocalAwareness (reason) {
@@ -507,6 +585,8 @@ class MultiplexBinding extends Observable {
   }
 
   /**
+   * Handles one routed sync/awareness message for this binding.
+   *
    * @param {Uint8Array} message
    * @param {boolean} emitBc
    */
@@ -552,6 +632,8 @@ class MultiplexBinding extends Observable {
   }
 
   /**
+   * Updates local sync flags and emits sync status events.
+   *
    * @param {boolean} synced
    */
   setSynced (synced) {
@@ -563,7 +645,9 @@ class MultiplexBinding extends Observable {
   }
 
   /**
-   * @param {'local'|'remote'|'all'} [scope]
+   * Removes awareness states by scope (local, remote, or all).
+   *
+   * @param {AwarenessRemovalScope} [scope]
    */
   removeAwarenessStates (scope = 'local') {
     const awareness = this.awareness
@@ -590,6 +674,9 @@ class MultiplexBinding extends Observable {
     }
   }
 
+  /**
+   * Starts periodic resubscribe pings when configured.
+   */
   startResyncInterval () {
     if (this.resyncInterval > 0 && this.resyncIntervalId === null) {
       this.resyncIntervalId = setInterval(() => {
@@ -600,6 +687,9 @@ class MultiplexBinding extends Observable {
     }
   }
 
+  /**
+   * Stops the periodic resubscribe timer.
+   */
   stopResyncInterval () {
     if (this.resyncIntervalId !== null) {
       clearInterval(this.resyncIntervalId)
@@ -608,6 +698,8 @@ class MultiplexBinding extends Observable {
   }
 
   /**
+   * Publishes a binding message to websocket and broadcast channel.
+   *
    * @param {Uint8Array} message
    */
   publishMessage (message) {
@@ -620,14 +712,11 @@ class MultiplexBinding extends Observable {
 
 class MultiplexProvider {
   /**
+   * Creates a multiplex provider that shares one websocket across docs.
+   *
    * @param {string} serverUrl
    * @param {string} namespace
-   * @param {Object} [opts]
-   * @param {boolean} [opts.connect]
-   * @param {Object<string, string>} [opts.params]
-   * @param {string | Array<string>} [opts.protocols]
-   * @param {typeof WebSocket} [opts.WebSocketPolyfill]
-   * @param {number} [opts.maxBackoffTime]
+   * @param {MultiplexProviderOptions} [opts]
    */
   constructor (serverUrl, namespace, {
     connect = true,
@@ -653,20 +742,18 @@ class MultiplexProvider {
   /**
    * Returns the shared physical websocket used by this provider, or null before connect.
    *
-   * @returns {WebSocket|null}
+   * @returns {MaybeWebSocket}
    */
   getWebSocket () {
     return this.wsManager.ws
   }
 
   /**
+   * Attaches a doc to this provider and returns its logical binding.
+   *
    * @param {string} docName
-   * @param {import('yjs').Doc} doc
-   * @param {Object} [opts]
-   * @param {boolean | awarenessProtocol.Awareness} [opts.awareness]
-   * @param {boolean} [opts.connect]
-   * @param {boolean} [opts.disableBc]
-   * @param {number} [opts.resyncInterval]
+   * @param {YDoc} doc
+   * @param {MultiplexAttachOptions} [opts]
    * @returns {MultiplexBinding}
    */
   attach (docName, doc, {
@@ -693,7 +780,9 @@ class MultiplexProvider {
   }
 
   /**
-   * @param {string | MultiplexBinding} docNameOrBinding
+   * Detaches and destroys a binding by doc name or binding instance.
+   *
+   * @param {DocNameOrBinding} docNameOrBinding
    */
   detach (docNameOrBinding) {
     const binding = typeof docNameOrBinding === 'string'
@@ -704,11 +793,17 @@ class MultiplexProvider {
     }
   }
 
+  /**
+   * Enables provider-level connectivity.
+   */
   connect () {
     this.shouldConnect = true
     this.wsManager.refreshConnectionState()
   }
 
+  /**
+   * Disables provider-level connectivity for all bindings.
+   */
   disconnect () {
     this.shouldConnect = false
     this.bindings.forEach(binding => {
@@ -719,6 +814,9 @@ class MultiplexProvider {
     this.wsManager.refreshConnectionState()
   }
 
+  /**
+   * Destroys all bindings associated with this provider.
+   */
   destroy () {
     Array.from(this.bindings.values()).forEach(binding => {
       binding.destroy()

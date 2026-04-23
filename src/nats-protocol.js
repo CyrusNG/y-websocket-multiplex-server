@@ -6,10 +6,22 @@ const MSG_AWARENESS = 2
 const MSG_SYNC_REQUEST = 3
 const MSG_SYNC_RESPONSE = 4
 
+/**
+ * Returns topic name for update fanout of one doc.
+ */
 const getUpdateTopic = docKey => `doc.${docKey}.update`
+/**
+ * Returns topic name for awareness fanout of one doc.
+ */
 const getAwarenessTopic = docKey => `doc.${docKey}.awareness`
+/**
+ * Returns RPC method subject for on-demand doc sync.
+ */
 const getSyncMethod = docKey => `doc.${docKey}.sync`
 
+/**
+ * Encodes an array of numbers using varint entries.
+ */
 const writeNumberArray = (encoder, values) => {
   encoding.writeVarUint(encoder, values.length)
   for (let i = 0; i < values.length; i++) {
@@ -17,6 +29,9 @@ const writeNumberArray = (encoder, values) => {
   }
 }
 
+/**
+ * Decodes an array of numbers written by writeNumberArray.
+ */
 const readNumberArray = decoder => {
   const length = decoding.readVarUint(decoder)
   const values = []
@@ -26,6 +41,9 @@ const readNumberArray = decoder => {
   return values
 }
 
+/**
+ * Encodes a doc update transport payload.
+ */
 const encodeUpdateMessage = (senderNodeId, update) => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MSG_UPDATE)
@@ -34,6 +52,9 @@ const encodeUpdateMessage = (senderNodeId, update) => {
   return encoding.toUint8Array(encoder)
 }
 
+/**
+ * Encodes an awareness transport payload.
+ */
 const encodeAwarenessMessage = (senderNodeId, awarenessUpdate, changedClients) => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MSG_AWARENESS)
@@ -43,6 +64,9 @@ const encodeAwarenessMessage = (senderNodeId, awarenessUpdate, changedClients) =
   return encoding.toUint8Array(encoder)
 }
 
+/**
+ * Encodes a sync request payload.
+ */
 const encodeSyncRequest = (requesterNodeId, stateVector) => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MSG_SYNC_REQUEST)
@@ -51,6 +75,9 @@ const encodeSyncRequest = (requesterNodeId, stateVector) => {
   return encoding.toUint8Array(encoder)
 }
 
+/**
+ * Encodes a sync response payload.
+ */
 const encodeSyncResponse = diffUpdate => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MSG_SYNC_RESPONSE)
@@ -58,6 +85,9 @@ const encodeSyncResponse = diffUpdate => {
   return encoding.toUint8Array(encoder)
 }
 
+/**
+ * Decodes a transport payload and returns typed message data.
+ */
 const decodeMessage = payload => {
   const decoder = decoding.createDecoder(payload)
   const messageType = decoding.readVarUint(decoder)

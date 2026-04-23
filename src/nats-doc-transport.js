@@ -10,21 +10,26 @@ import {
   MESSAGE_TYPE
 } from './nats-protocol.js'
 
+/**
+ * @typedef {import('./types.js').NatsDocTransportOptions} NatsDocTransportOptions
+ * @typedef {import('./types.js').DocSubscribeHandlers} DocSubscribeHandlers
+ */
+
 class NatsDocTransport {
   /**
-   * @param {{ bus: import('./nats-bus.js').NatsBus }} options
+   * Creates a NATS-backed transport adapter for doc sync messages.
+   *
+   * @param {NatsDocTransportOptions} options
    */
   constructor ({ bus }) {
     this.bus = bus
   }
 
   /**
+   * Subscribes to update/awareness/sync channels for one document key.
+   *
    * @param {string} docKey
-   * @param {{
-   * onUpdate: (senderNodeId: string, update: Uint8Array) => void,
-   * onAwareness: (senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void,
-   * onSyncRequest: (requesterNodeId: string, stateVector: Uint8Array) => Uint8Array
-   * }} handlers
+   * @param {DocSubscribeHandlers} handlers
    * @returns {Promise<() => void>}
    */
   async subscribeDoc (docKey, handlers) {
@@ -71,6 +76,8 @@ class NatsDocTransport {
   }
 
   /**
+   * Publishes a document update message to the cluster.
+   *
    * @param {string} docKey
    * @param {string} senderNodeId
    * @param {Uint8Array} update
@@ -80,6 +87,8 @@ class NatsDocTransport {
   }
 
   /**
+   * Publishes an awareness update message to the cluster.
+   *
    * @param {string} docKey
    * @param {string} senderNodeId
    * @param {Uint8Array} awarenessUpdate
@@ -93,6 +102,8 @@ class NatsDocTransport {
   }
 
   /**
+   * Requests a sync diff from a target node using a state vector.
+   *
    * @param {string} docKey
    * @param {string} targetNodeId
    * @param {string} requesterNodeId

@@ -1,6 +1,11 @@
 import http from 'http'
 import * as number from 'lib0/number'
 
+/**
+ * @typedef {import('./types.js').CallbackData} CallbackData
+ * @typedef {import('./utils-docs.js').WSSharedDoc} WSSharedDoc
+ */
+
 const CALLBACK_URL = process.env.CALLBACK_URL ? new URL(process.env.CALLBACK_URL) : null
 const CALLBACK_TIMEOUT = number.parseInt(process.env.CALLBACK_TIMEOUT || '5000')
 const CALLBACK_OBJECTS = process.env.CALLBACK_OBJECTS ? JSON.parse(process.env.CALLBACK_OBJECTS) : {}
@@ -8,7 +13,9 @@ const CALLBACK_OBJECTS = process.env.CALLBACK_OBJECTS ? JSON.parse(process.env.C
 export const isCallbackSet = !!CALLBACK_URL
 
 /**
- * @param {import('./utils-docs.js').WSSharedDoc} doc
+ * Builds callback payload data from configured shared objects and posts it.
+ *
+ * @param {WSSharedDoc} doc
  */
 export const callbackHandler = (doc) => {
   const room = doc.name
@@ -28,12 +35,14 @@ export const callbackHandler = (doc) => {
 }
 
 /**
+ * Sends one HTTP callback request with timeout and error handling.
+ *
  * @param {URL} url
  * @param {number} timeout
- * @param {Object} data
+ * @param {CallbackData} data
  */
 const callbackRequest = (url, timeout, data) => {
-  data = JSON.stringify(data)
+  const payload = JSON.stringify(data)
   const options = {
     hostname: url.hostname,
     port: url.port,
@@ -42,7 +51,7 @@ const callbackRequest = (url, timeout, data) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(data)
+      'Content-Length': Buffer.byteLength(payload)
     }
   }
   const req = http.request(options)
@@ -54,14 +63,16 @@ const callbackRequest = (url, timeout, data) => {
     console.error('Callback request error.', e)
     req.abort()
   })
-  req.write(data)
+  req.write(payload)
   req.end()
 }
 
 /**
+ * Returns the requested shared type wrapper from a Yjs document.
+ *
  * @param {string} objName
  * @param {string} objType
- * @param {import('./utils-docs.js').WSSharedDoc} doc
+ * @param {WSSharedDoc} doc
  */
 const getContent = (objName, objType, doc) => {
   switch (objType) {
