@@ -3,8 +3,7 @@ import WebSocket from 'ws'
 import * as Y from 'yjs'
 import { MultiplexProvider } from '../src/multiplex-provider.js'
 import { createClusterSyncFromEnv, startWebsocketServer } from '../src/server.js'
-import { getYdocCluster } from '../src/cluster.js'
-import { setClusterSync } from '../src/utils-docs.js'
+import { getClusterSync, setClusterSync } from '../src/utils-docs.js'
 
 /**
  * @param {() => boolean} predicate
@@ -43,7 +42,7 @@ const getListeningPort = runtime => {
 
 test('runs sync normally without setting up cluster mode', async () => {
   setClusterSync(null)
-  if (getYdocCluster() !== null) {
+  if (getClusterSync() !== null) {
     throw new Error('Expected no active ydoc cluster instance before non-cluster test')
   }
 
@@ -91,7 +90,7 @@ test('does not create cluster sync from env when nats servers are missing', asyn
   if (clusterSync !== null) {
     throw new Error('Expected createClusterSyncFromEnv to return null without NATS_SERVERS')
   }
-  if (getYdocCluster() !== null) {
-    throw new Error('No ydoc cluster instance should be created in non-cluster env config')
+  if (getClusterSync() !== null) {
+    throw new Error('No cluster sync runtime should be created in non-cluster env config')
   }
 })

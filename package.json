@@ -12,8 +12,7 @@
     "preversion": "npm run lint && npm run dist && test -e dist/src/server.d.ts && test -e dist/server.cjs"
   },
   "bin": {
-    "y-websocket-multiplex-server": "src/server.js",
-    "y-websocket": "src/server.js"
+    "y-websocket-multiplex-server": "src/server.js"
   },
   "files": [
     "dist/*",

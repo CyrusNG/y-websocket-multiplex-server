@@ -640,7 +640,6 @@ class MultiplexBinding extends Observable {
     if (this.synced !== synced) {
       this.synced = synced
       this.emit('sync', [synced])
-      this.emit('synced', [synced])
     }
   }
 

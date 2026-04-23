@@ -10,8 +10,6 @@ import { createSubjectFormatter } from './nats-subject.js'
  * @typedef {import('./types.js').SubscriptionMessageHandler} SubscriptionMessageHandler
  */
 
-const noopUnsub = () => {}
-
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
 
@@ -243,9 +241,4 @@ class NatsBus {
   }
 }
 
-const createNoopUnsub = () => noopUnsub
-
-const decodeBusText = decodeText
-const encodeBusText = encodeText
-
-export { NatsBus, createNoopUnsub, decodeBusText, encodeBusText }
+export { NatsBus, decodeText, encodeText }
