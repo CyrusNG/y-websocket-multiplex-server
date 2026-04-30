@@ -44,6 +44,64 @@ const messageAwareness = 1
 const messageRoute = 2
 const messageRouteClose = 3
 
+const now = () => Date.now()
+let updateSeq = 0
+const createUpdateId = () => `${now().toString(36)}-${(updateSeq++).toString(36)}`
+
+/**
+ * @param {any} origin
+ * @returns {origin is { source: any, meta: any }}
+ */
+const isStructuredOrigin = origin =>
+  origin !== null &&
+  typeof origin === 'object' &&
+  Object.prototype.hasOwnProperty.call(origin, 'source') &&
+  origin.meta !== null &&
+  typeof origin.meta === 'object'
+
+/**
+ * Normalizes a local origin into { source, meta: { docId, receivedAt } }.
+ *
+ * @param {string} docId
+ * @param {any} origin
+ */
+const normalizeLocalOrigin = (docId, origin) => {
+  if (isStructuredOrigin(origin)) {
+    return {
+      source: origin.source,
+      meta: {
+        ...origin.meta,
+        docId,
+        receivedAt: now(),
+        updateId: createUpdateId()
+      }
+    }
+  }
+  return {
+    source: origin === undefined ? 'local' : origin,
+    meta: {
+      docId,
+      receivedAt: now(),
+      updateId: createUpdateId()
+    }
+  }
+}
+
+/**
+ * Normalizes a non-local origin into { source, meta: { docId, receivedAt } }.
+ *
+ * @param {string} docId
+ * @param {string} source
+ */
+const normalizeTransportOrigin = (docId, source) => ({
+  source,
+  meta: {
+    docId,
+    receivedAt: now(),
+    updateId: createUpdateId()
+  }
+})
+
 /**
  * Builds a stable map key for one namespaced document.
  */
@@ -178,6 +236,19 @@ class WSSharedDoc extends Y.Doc {
   }
 
   /**
+   * Applies updates inside a transaction while ensuring origin shape consistency.
+   *
+   * @template T
+   * @param {(arg0: import('yjs').Transaction) => T} f
+   * @param {any} origin
+   * @returns {T}
+   */
+  transact (f, origin) {
+    const normalizedOrigin = normalizeLocalOrigin(this.name, origin)
+    return super.transact(f, normalizedOrigin)
+  }
+
+  /**
    * Cleans up sync engine resources before destroying the doc.
    */
   destroy () {
@@ -297,7 +368,12 @@ const messageListener = (conn, doc, message) => {
     switch (messageType) {
       case messageSync:
         encoding.writeVarUint(encoder, messageSync)
-        syncProtocol.readSyncMessage(decoder, encoder, doc, conn)
+        syncProtocol.readSyncMessage(
+          decoder,
+          encoder,
+          doc,
+          normalizeTransportOrigin(doc.name, 'client')
+        )
         if (encoding.length(encoder) > 1) {
           send(doc, conn, encoding.toUint8Array(encoder))
         }

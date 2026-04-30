@@ -225,6 +225,51 @@ Adapter shape:
 - `bindState(name, doc)`
 - `unbindState(name, doc)`
 
+### Origin Conventions
+
+`ydoc.on('update', (update, origin) => { ... })` forwards the Yjs `origin` value.
+
+This project normalizes all update origins to a shared shape:
+
+```js
+origin = {
+  source,
+  meta: {
+    docId,
+    receivedAt,
+    updateId
+  }
+}
+```
+
+To reliably receive the structured `{ source, meta }` origin in `ydoc.on('update')` for local changes, wrap local mutations in `doc.transact(...)`.
+The transaction origin is then normalized by this project.
+
+If you call `Y.applyUpdate(doc, update, origin)` directly, Yjs forwards that `origin` value as-is.
+For example, `Y.applyUpdate(doc, update, 'persister')` will emit `'persister'` (not a structured origin object).
+If you need structured origin on direct apply, pass an object origin explicitly.
+
+`source` values by path:
+
+- Cluster sync updates: `source: 'cluster'`
+- Cluster catch-up updates: `source: 'catchup'`
+- Websocket client sync updates: `source: 'client'`
+- Local updates without explicit origin (`doc.transact(fn)`): `source: 'local'`
+- Local updates with explicit origin (`doc.transact(fn, origin)`): `source` is set to the passed `origin` value as-is
+
+Cluster mode keeps extra metadata in `meta`:
+
+- `senderNodeId`
+- `receiverNodeId`
+
+Persistence guidance for host applications:
+
+- Persist only business/live updates (for example `source: 'cluster'` and your local business sources).
+- Do not persist `source: 'catchup'` updates.
+- In other words, catch-up updates are transport diffs and should be ignored by persistence in the host project.
+
+For example, you can use `source: 'replay_from_db'` when replaying persisted updates and skip re-persisting those updates in your adapter.
+
 ## HTTP Callback on Update
 
 Debounced HTTP callback on document updates.

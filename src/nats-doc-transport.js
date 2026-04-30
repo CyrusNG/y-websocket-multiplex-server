@@ -42,7 +42,8 @@ class NatsDocTransport {
       }
       handlers.onUpdate(
         /** @type {string} */ (parsed.senderNodeId),
-        /** @type {Uint8Array} */ (parsed.update)
+        /** @type {Uint8Array} */ (parsed.update),
+        parsed.updateId
       )
     }))
 
@@ -81,9 +82,19 @@ class NatsDocTransport {
    * @param {string} docKey
    * @param {string} senderNodeId
    * @param {Uint8Array} update
+   * @param {any} origin
    */
-  async publishUpdate (docKey, senderNodeId, update) {
-    await this.bus.publish(getUpdateTopic(docKey), encodeUpdateMessage(senderNodeId, update))
+  async publishUpdate (docKey, senderNodeId, update, origin) {
+    const updateId = (
+      origin !== null &&
+      typeof origin === 'object' &&
+      origin.meta !== null &&
+      typeof origin.meta === 'object' &&
+      typeof origin.meta.updateId === 'string'
+    )
+      ? origin.meta.updateId
+      : undefined
+    await this.bus.publish(getUpdateTopic(docKey), encodeUpdateMessage(senderNodeId, update, updateId))
   }
 
   /**

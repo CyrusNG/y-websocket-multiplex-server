@@ -215,6 +215,53 @@ test('syncs doc state across cluster nodes via update and resync', async () => {
   await nodeB.cluster.close()
 })
 
+test('preserves updateId when forwarding client-origin update across cluster nodes', async () => {
+  const broker = new InMemoryBroker()
+  const nodeA = createClusterNode({ nodeId: 'node-a', broker })
+  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
+  const forwardedUpdateId = 'client-update-fixed-id'
+
+  /** @type {any} */
+  let remoteOriginOnB = null
+  nodeB.doc.on('update', (_update, origin) => {
+    if (origin && typeof origin === 'object' && origin.source === 'cluster') {
+      remoteOriginOnB = origin
+    }
+  })
+
+  await nodeA.cluster.connect()
+  await nodeB.cluster.connect()
+  await nodeA.cluster.bindDoc('default', 'cluster-doc', nodeA.doc, nodeA.awareness)
+  await nodeB.cluster.bindDoc('default', 'cluster-doc', nodeB.doc, nodeB.awareness)
+  nodeA.cluster.setNodes('node-b', ['node-a', 'node-b'])
+  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+
+  nodeA.doc.transact(() => {
+    nodeA.doc.getMap('data').set('value', 'from-client-origin')
+  }, {
+    source: 'client',
+    meta: {
+      updateId: forwardedUpdateId
+    }
+  })
+
+  await waitFor(
+    () => nodeB.doc.getMap('data').get('value') === 'from-client-origin',
+    'Node B did not receive forwarded client-origin update'
+  )
+  await waitFor(
+    () => remoteOriginOnB !== null,
+    'Node B did not observe cluster origin metadata for forwarded update'
+  )
+
+  if (remoteOriginOnB.meta?.updateId !== forwardedUpdateId) {
+    throw new Error(`Expected forwarded updateId "${forwardedUpdateId}", got "${String(remoteOriginOnB.meta?.updateId)}"`)
+  }
+
+  await nodeA.cluster.close()
+  await nodeB.cluster.close()
+})
+
 test('removes remote awareness when a cluster node is removed', async () => {
   const broker = new InMemoryBroker()
   const nodeA = createClusterNode({ nodeId: 'node-a', broker })

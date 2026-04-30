@@ -9,6 +9,8 @@ import { createYDocSyncCore } from './sync-core.js'
  * Deduplicates a number array while preserving insertion order.
  */
 const uniqueNumbers = values => Array.from(new Set(values))
+let updateSeq = 0
+const createUpdateId = () => `${Date.now().toString(36)}-${(updateSeq++).toString(36)}`
 
 class DocSyncEngine {
   /**
@@ -23,6 +25,7 @@ class DocSyncEngine {
     nodeId,
     transport,
     remoteOrigin,
+    isClusterOrigin,
     onRemoteAwareness
   }) {
     this.doc = doc
@@ -36,6 +39,7 @@ class DocSyncEngine {
       doc,
       awareness,
       remoteOrigin,
+      isClusterOrigin,
       onLocalUpdate: async (update, origin) => {
         await this.transport.publishUpdate(this.docKey, this.nodeId, update, origin)
       },
@@ -68,11 +72,22 @@ class DocSyncEngine {
       return
     }
     this.unsubscribeTransport = await this.transport.subscribeDoc(this.docKey, {
-      onUpdate: (senderNodeId, update) => {
+      onUpdate: (senderNodeId, update, updateId) => {
         if (senderNodeId === this.nodeId) {
           return
         }
-        this.syncCore.applyRemoteUpdate(update)
+        this.syncCore.applyRemoteUpdate(update, {
+          source: 'cluster',
+          meta: {
+            senderNodeId,
+            receiverNodeId: this.nodeId,
+            docId: this.docKey,
+            receivedAt: Date.now(),
+            updateId: typeof updateId === 'string' && updateId.length > 0
+              ? updateId
+              : createUpdateId()
+          }
+        })
       },
       onAwareness: (senderNodeId, awarenessUpdate, changedClients) => {
         if (senderNodeId === this.nodeId) {
@@ -94,7 +109,16 @@ class DocSyncEngine {
   async resyncFrom (targetNodeId) {
     const stateVector = this.syncCore.encodeStateVector()
     const diff = await this.transport.requestSync(this.docKey, targetNodeId, this.nodeId, stateVector)
-    this.syncCore.applyRemoteUpdate(diff)
+    this.syncCore.applyRemoteUpdate(diff, {
+      source: 'catchup',
+      meta: {
+        senderNodeId: targetNodeId,
+        receiverNodeId: this.nodeId,
+        docId: this.docKey,
+        receivedAt: Date.now(),
+        updateId: createUpdateId()
+      }
+    })
   }
 
   /**

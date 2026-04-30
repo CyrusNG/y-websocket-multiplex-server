@@ -20,17 +20,21 @@ class YDocSyncCore {
     doc,
     awareness,
     remoteOrigin,
+    isClusterOrigin,
     onLocalUpdate,
     onLocalAwarenessUpdate
   }) {
     this.doc = doc
     this.awareness = awareness
     this.remoteOrigin = remoteOrigin
+    this.isClusterOrigin = typeof isClusterOrigin === 'function'
+      ? isClusterOrigin
+      : origin => origin === this.remoteOrigin
     this.onLocalUpdate = onLocalUpdate
     this.onLocalAwarenessUpdate = onLocalAwarenessUpdate
 
     this.handleDocUpdate = (update, origin) => {
-      if (origin === this.remoteOrigin) {
+      if (this.isClusterOrigin(origin)) {
         return
       }
       Promise.resolve(this.onLocalUpdate(update, origin)).catch(err => {
@@ -39,7 +43,7 @@ class YDocSyncCore {
     }
 
     this.handleAwarenessUpdate = (changes, origin) => {
-      if (origin === this.remoteOrigin) {
+      if (this.isClusterOrigin(origin)) {
         return
       }
       Promise.resolve(this.onLocalAwarenessUpdate(changes, origin)).catch(err => {
@@ -56,8 +60,8 @@ class YDocSyncCore {
    *
    * @param {Uint8Array} update
    */
-  applyRemoteUpdate (update) {
-    Y.applyUpdate(this.doc, update, this.remoteOrigin)
+  applyRemoteUpdate (update, origin = this.remoteOrigin) {
+    Y.applyUpdate(this.doc, update, origin)
   }
 
   /**
@@ -65,9 +69,9 @@ class YDocSyncCore {
    *
    * @param {Uint8Array} awarenessUpdate
    */
-  applyRemoteAwarenessUpdate (awarenessUpdate) {
+  applyRemoteAwarenessUpdate (awarenessUpdate, origin = this.remoteOrigin) {
     const nullStateClients = getNullStateClients(awarenessUpdate)
-    awarenessProtocol.applyAwarenessUpdate(this.awareness, awarenessUpdate, this.remoteOrigin)
+    awarenessProtocol.applyAwarenessUpdate(this.awareness, awarenessUpdate, origin)
     nullStateClients.forEach(clientID => {
       if (clientID !== this.doc.clientID) {
         this.awareness.meta.delete(clientID)

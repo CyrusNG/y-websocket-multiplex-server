@@ -125,6 +125,11 @@ class YjsNatsCluster {
       nodeId: this.nodeId,
       transport: this.transport,
       remoteOrigin: ORIGIN_CLUSTER,
+      isClusterOrigin: origin =>
+        origin === ORIGIN_CLUSTER ||
+        (origin !== null &&
+          typeof origin === 'object' &&
+          (origin.source === 'cluster' || origin.source === 'catchup')),
       onRemoteAwareness: (senderNodeId, changedClients) => {
         this.updateAwarenessOwnership(state, senderNodeId, changedClients)
       }
@@ -135,7 +140,7 @@ class YjsNatsCluster {
     await state.engine.connect()
 
     const localAwarenessObserver = ({ added, updated, removed }, origin) => {
-      if (origin === ORIGIN_CLUSTER) {
+      if (state.engine.syncCore.isClusterOrigin(origin)) {
         return
       }
       const changedClients = Array.from(new Set(added.concat(updated, removed)))

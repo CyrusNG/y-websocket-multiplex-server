@@ -98,6 +98,7 @@
  * doc: import('yjs').Doc,
  * awareness: import('@y/protocols/awareness').Awareness,
  * remoteOrigin: any,
+ * isClusterOrigin?: (origin: any) => boolean,
  * onLocalUpdate: (update: Uint8Array, origin: any) => (void | Promise<void>),
  * onLocalAwarenessUpdate: (changes: AwarenessChanges, origin: any) => (void | Promise<void>)
  * }} CreateYDocSyncCoreOptions
@@ -154,7 +155,7 @@
  */
 /**
  * @typedef {{
- * onUpdate: (senderNodeId: string, update: Uint8Array) => void,
+ * onUpdate: (senderNodeId: string, update: Uint8Array, updateId?: string) => void,
  * onAwareness: (senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void,
  * onSyncRequest: (requesterNodeId: string, stateVector: Uint8Array) => Uint8Array
  * }} DocSubscribeHandlers
@@ -186,6 +187,7 @@
  * nodeId: string,
  * transport: DocSyncTransport,
  * remoteOrigin: any,
+ * isClusterOrigin?: (origin: any) => boolean,
  * onRemoteAwareness: (senderNodeId: string, changedClients: Array<number>) => void
  * }} DocSyncEngineOptions
  */

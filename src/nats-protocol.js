@@ -44,11 +44,12 @@ const readNumberArray = decoder => {
 /**
  * Encodes a doc update transport payload.
  */
-const encodeUpdateMessage = (senderNodeId, update) => {
+const encodeUpdateMessage = (senderNodeId, update, updateId) => {
   const encoder = encoding.createEncoder()
   encoding.writeVarUint(encoder, MSG_UPDATE)
   encoding.writeVarString(encoder, senderNodeId)
   encoding.writeVarUint8Array(encoder, update)
+  encoding.writeVarString(encoder, typeof updateId === 'string' ? updateId : '')
   return encoding.toUint8Array(encoder)
 }
 
@@ -93,10 +94,15 @@ const decodeMessage = payload => {
   const messageType = decoding.readVarUint(decoder)
 
   if (messageType === MSG_UPDATE) {
+    const senderNodeId = decoding.readVarString(decoder)
+    const update = decoding.readVarUint8Array(decoder)
+    // Keep backward compatibility with older payloads that do not include updateId.
+    const updateId = decoding.hasContent(decoder) ? decoding.readVarString(decoder) : ''
     return {
       messageType,
-      senderNodeId: decoding.readVarString(decoder),
-      update: decoding.readVarUint8Array(decoder)
+      senderNodeId,
+      update,
+      updateId: updateId.length > 0 ? updateId : undefined
     }
   }
 
