@@ -452,13 +452,6 @@ class MultiplexBinding extends Observable {
       /** @type {any} */ origin
     ) => {
       const awareness = this.awareness
-      if (awareness !== null && changes.removed.length > 0) {
-        changes.removed.forEach(clientID => {
-          if (clientID !== this.doc.clientID) {
-            awareness.meta.delete(clientID)
-          }
-        })
-      }
       if (origin !== this && awareness !== null) {
         const changedClients = changes.added.concat(changes.updated, changes.removed)
         const encoder = encoding.createEncoder()
@@ -469,6 +462,13 @@ class MultiplexBinding extends Observable {
         )
         const message = encoding.toUint8Array(encoder)
         this.publishMessage(message)
+      }
+      if (awareness !== null && changes.removed.length > 0) {
+        changes.removed.forEach(clientID => {
+          if (clientID !== this.doc.clientID) {
+            awareness.meta.delete(clientID)
+          }
+        })
       }
     }
 
