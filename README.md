@@ -102,11 +102,39 @@ under namespace `ticket`, server-side doc identity is `ticket + version`.
 
 The package ships with a CLI runtime (`src/server.js`):
 
+It uses `setupWSConnection(...)` internally and serves a basic HTTP 200 health response.
+
+Also, debounced HTTP callback on document updates.
+
+Environment variables:
+
+- `NATS_SERVERS`: comma-separated servers
+- `NATS_NODE_ID`: optional node id (defaults to `host:port:pid`)
+- `NATS_RESYNC_INTERVAL`: periodic resync interval in ms (default `30000`)
+- `CALLBACK_URL`
+- `CALLBACK_DEBOUNCE_WAIT` (default `2000`)
+- `CALLBACK_DEBOUNCE_MAXWAIT` (default `10000`)
+- `CALLBACK_TIMEOUT` (default `5000`)
+- `CALLBACK_OBJECTS` (JSON map of shared object name -> type)
+
+Example:
+
 ```sh
 npx y-websocket-multiplex-server
 ```
 
-It uses `setupWSConnection(...)` internally and serves a basic HTTP 200 health response.
+```sh
+CALLBACK_URL=http://localhost:3000/ \
+CALLBACK_OBJECTS='{"prosemirror":"XmlFragment"}' \
+npx y-websocket-multiplex-server
+```
+
+```sh
+NATS_SERVERS=nats://127.0.0.1:4222 
+NATS_NODE_ID=node-a 
+npx y-websocket-multiplex-server
+```
+
 
 ## Custom Server Wiring
 
@@ -142,37 +170,41 @@ server.listen(1234)
 
 ## Cluster Sync with NATS
 
-This project includes server-to-server sync (`update`, `awareness`, and state-vector resync).
+This project includes server-to-server ydoc sync feature.
 
-Use the convenience setup:
+Setup cluster mode when host project boot:
 
 ```js
 import { setupYdocCluster } from 'y-multiplex-websocket-server/cluster'
 
-setupYdocCluster({
-  nodeId: 'node-a',
-  nats: {
-    connectOptions: {
-      servers: ['nats://127.0.0.1:4222']
-    }
-  },
-  resyncIntervalMs: 30000
+  setupYdocCluster({
+    nodeId: hostNodeId,
+    nats: {
+      connection: hostNatsConnection,
+      subjectTemplate: {
+        broadcast: 'myapp.ydoc.broadcast.{topic}.{channel}.{event}',
+        unicast: 'myapp.ydoc.unicast.{nodeId}.{method}'
+      }
+    },
+    chooseSyncNode: (docKey, aliveNodes, currentSyncNode) => host.pickSyncNode(docKey, aliveNodes, currentSyncNode)
+  });
+
+```
+
+And host project pass cluster nodes changed info at its nodes changed event:
+
+```js
+import { getYdocCluster } from 'y-multiplex-websocket-server/cluster'
+
+host.onMembershipChanged(({ aliveNodeIds, leaderNodeId, removedNodeIds }) => {
+  const ydocCluster = getYdocCluster();
+  if (!ydocCluster) return;
+  removedNodeIds.forEach(nodeId => ydocCluster.removeNode(nodeId));
+  ydocCluster.setNodes(leaderNodeId, aliveNodeIds);
 })
 ```
 
-Or via bundled server env:
-
-```sh
-NATS_SERVERS=nats://127.0.0.1:4222 NATS_NODE_ID=node-a npx y-websocket-multiplex-server
-```
-
-Environment variables:
-
-- `NATS_SERVERS`: comma-separated servers
-- `NATS_NODE_ID`: optional node id (defaults to `host:port:pid`)
-- `NATS_RESYNC_INTERVAL`: periodic resync interval in ms (default `30000`)
-
-### Subjects and Methods
+### NATS Subjects and Methods
 
 Logical names used by cluster sync:
 
@@ -200,35 +232,13 @@ With `subjectTemplate` configured:
 - `broadcast` template maps `{topic}.{channel}.{event}` from logical names
 - `unicast` template maps `{nodeId}` + `{method}` where method is `doc.{namespace}-{docName}.anti-entropy`
 
-### Host-managed membership (optional)
-
-```js
-import { setupYdocCluster } from 'y-multiplex-websocket-server/cluster'
-
-const cluster = setupYdocCluster({
-  nodeId: hostNodeId,
-  nats: {
-    connection: hostNatsConnection,
-    subjectTemplate: {
-      broadcast: 'myapp.ydoc.broadcast.{topic}.{channel}.{event}',
-      unicast: 'myapp.ydoc.unicast.{nodeId}.{method}'
-    }
-  },
-  chooseSyncNode: (docKey, aliveNodes, currentSyncNode) =>
-    hostCluster.pickSyncNode(docKey, aliveNodes, currentSyncNode)
-})
-
-hostCluster.onMembershipChanged(({ aliveNodeIds, leaderNodeId, removedNodeIds }) => {
-  cluster.setNodes(leaderNodeId, aliveNodeIds)
-  removedNodeIds.forEach(nodeId => cluster.removeNode(nodeId))
-})
-```
-
 Subject template validation:
 
 - `broadcast` must include `{topic}`, `{channel}`, `{event}`
 - `unicast` must include `{nodeId}`, `{method}`
 - unknown tokens are rejected
+
+
 
 ## Persistence
 
@@ -298,25 +308,44 @@ Persistence guidance for host applications:
 
 For example, you can use `source: 'replay_from_db'` when replaying persisted updates and skip re-persisting those updates in your adapter.
 
-## HTTP Callback on Update
 
-Debounced HTTP callback on document updates.
 
-Environment variables:
+## Cluster Synchronous Mechanism
 
-- `CALLBACK_URL`
-- `CALLBACK_DEBOUNCE_WAIT` (default `2000`)
-- `CALLBACK_DEBOUNCE_MAXWAIT` (default `10000`)
-- `CALLBACK_TIMEOUT` (default `5000`)
-- `CALLBACK_OBJECTS` (JSON map of shared object name -> type)
+In cluster mode, we use NATS for synchronous, there are two sync paths running together:
 
-Example:
+- `ydoc` content sync
+- `awareness` presence sync
 
-```sh
-CALLBACK_URL=http://localhost:3000/ \
-CALLBACK_OBJECTS='{"prosemirror":"XmlFragment"}' \
-npx y-websocket-multiplex-server
-```
+Realtime broadcast timing:
+
+- On local Yjs doc update, broadcast immediately to `doc.{namespace}-{docName}.update`.
+- On local awareness change, broadcast immediately to `doc.{namespace}-{docName}.awareness`.
+
+Anti-entropy timing:
+
+- `ydoc` anti-entropy:
+  - runs once in background after `bindDoc` (eager catch-up),
+  - runs periodically when `resyncIntervalMs > 0`,
+  - can be triggered by host via `resyncDoc` / `resyncAllDocs`.
+- `awareness` anti-entropy:
+  - runs after `bindDoc`,
+  - runs periodically when `resyncIntervalMs > 0`,
+  - runs again when `setNodes(...)` detects remote node join.
+
+Host/runtime responsibility:
+
+- Host is responsible for membership detection (alive nodes, removed nodes, optional sync node/leader).
+- Host should push topology updates into this project by calling:
+  - `setNodes(syncNode, aliveNodeIds)`
+  - `removeNode(nodeId)` for explicit removals.
+
+What this project does after host topology updates:
+
+- removes awareness owned by down nodes,
+- drops stale snapshots for removed nodes,
+- runs awareness reconciliation when needed to converge presence state.
+
 
 ## Package Exports
 
