@@ -205,6 +205,20 @@ host.onMembershipChanged(({ aliveNodeIds, leaderNodeId, removedNodeIds }) => {
 })
 ```
 
+### `setupYdocCluster(options)` configurable Fields
+
+- `nodeId: string` (required): current cluster node id.
+- `bus?: ClusterBus`: custom cluster bus implementation (when set, built-in NATS bus creation is skipped).
+- `nats?: { ... }`: built-in NATS bus options.
+  - `connection?`: reuse an existing NATS connection.
+  - `connectOptions?`: NATS connection options when creating a new connection.
+  - `subjectTemplate?`: custom subject templates for broadcast/unicast.
+  - `requestTimeoutMs?`: request timeout for unicast sync RPC.
+  - `maxRetries?`: retry count for unicast sync RPC.
+  - `closeNatsOnClose?`: whether to close shared NATS connection on cluster close (connection mode only).
+- `resyncInterval?: number`: periodic cluster anti-entropy interval in milliseconds. Default `-1` (disabled).
+- `chooseSyncNode?: (docKey, aliveNodes, currentSyncNode) => string | null`: custom sync target picker per doc.
+
 ### NATS Subjects and Methods
 
 Logical names used by cluster sync:
