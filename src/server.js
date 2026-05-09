@@ -34,7 +34,7 @@ const createClusterSyncFromEnv = ({ host, port, env = process.env }) => {
         servers: natsServers
       }
     },
-    resyncIntervalMs: number.parseInt(env.NATS_RESYNC_INTERVAL || '30000')
+    resyncInterval: number.parseInt(env.NATS_RESYNC_INTERVAL || '-1')
   })
 }
 

@@ -55,7 +55,7 @@ const createNode = async (label, clientID) => {
   const cluster = new YjsNatsCluster({
     bus,
     nodeId,
-    resyncIntervalMs: 0
+    resyncInterval: 0
   })
 
   await cluster.connect()

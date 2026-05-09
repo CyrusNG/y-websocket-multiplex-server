@@ -232,7 +232,7 @@ class YDocClusterSyncAdapter {
       bus: this.bus,
       nodeId: options.nodeId,
       chooseSyncNode: options.chooseSyncNode,
-      resyncIntervalMs: options.resyncIntervalMs
+      resyncInterval: options.resyncInterval
     })
     this.connected = false
   }

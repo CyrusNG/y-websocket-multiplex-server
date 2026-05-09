@@ -110,7 +110,7 @@ Environment variables:
 
 - `NATS_SERVERS`: comma-separated servers
 - `NATS_NODE_ID`: optional node id (defaults to `host:port:pid`)
-- `NATS_RESYNC_INTERVAL`: periodic resync interval in ms (default `30000`)
+- `NATS_RESYNC_INTERVAL`: periodic resync interval in ms (default `-1`, disabled)
 - `CALLBACK_URL`
 - `CALLBACK_DEBOUNCE_WAIT` (default `2000`)
 - `CALLBACK_DEBOUNCE_MAXWAIT` (default `10000`)
@@ -186,6 +186,7 @@ import { setupYdocCluster } from 'y-multiplex-websocket-server/cluster'
         unicast: 'myapp.ydoc.unicast.{nodeId}.{method}'
       }
     },
+    resyncInterval: 30000, // ms; default is -1 (disabled), enable as an anti-entropy fallback for missed sync
     chooseSyncNode: (docKey, aliveNodes, currentSyncNode) => host.pickSyncNode(docKey, aliveNodes, currentSyncNode)
   });
 
@@ -272,11 +273,7 @@ This project normalizes all update origins to a shared shape:
 ```js
 origin = {
   source,
-  meta: {
-    docId,
-    receivedAt,
-    updateId
-  }
+  meta: { docId, receivedAt, updateId }
 }
 ```
 
@@ -326,11 +323,11 @@ Anti-entropy timing:
 
 - `ydoc` anti-entropy:
   - runs once in background after `bindDoc` (eager catch-up),
-  - runs periodically when `resyncIntervalMs > 0`,
+  - runs periodically when `resyncInterval > 0`,
   - can be triggered by host via `resyncDoc` / `resyncAllDocs`.
 - `awareness` anti-entropy:
   - runs after `bindDoc`,
-  - runs periodically when `resyncIntervalMs > 0`,
+  - runs periodically when `resyncInterval > 0`,
   - runs again when `setNodes(...)` detects remote node join.
 
 Host/runtime responsibility:
@@ -345,6 +342,19 @@ What this project does after host topology updates:
 - removes awareness owned by down nodes,
 - drops stale snapshots for removed nodes,
 - runs awareness reconciliation when needed to converge presence state.
+
+`bindDoc` in cluster mode:
+
+- `bindDoc(namespace, docName, doc, awareness)` attaches one doc to cluster sync.
+- After binding, this doc starts participating in cross-node `update` / `awareness` / anti-entropy.
+- Without `bindDoc`, a doc does not join server-to-server cluster synchronization.
+- In non-cluster mode, `bindDoc` will NOT be called.
+
+Awareness ownership map:
+
+- Each bound doc keeps `ownedAwarenessClientsByNode: Map<nodeId, Set<clientId>>`.
+- On awareness changes, changed clients are reassigned to the sender node (and removed from other owners).
+- On topology down events (`setNodes` / `removeNode`), awareness owned by removed nodes is cleaned up.
 
 
 ## Package Exports

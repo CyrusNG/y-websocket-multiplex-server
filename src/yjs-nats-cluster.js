@@ -44,12 +44,12 @@ class YjsNatsCluster {
     bus,
     nodeId,
     chooseSyncNode,
-    resyncIntervalMs = 30000
+    resyncInterval = -1
   }) {
     this.bus = bus
     this.nodeId = nodeId
     this.chooseSyncNode = chooseSyncNode || null
-    this.resyncIntervalMs = resyncIntervalMs
+    this.resyncInterval = resyncInterval
     this.syncNode = null
     this.aliveNodes = new Set([this.nodeId])
 
@@ -204,7 +204,7 @@ class YjsNatsCluster {
         })
       })
     }
-    if (this.resyncIntervalMs > 0 && this.resyncIntervalId === null) {
+    if (this.resyncInterval > 0 && this.resyncIntervalId === null) {
       this.resyncIntervalId = setInterval(() => {
         this.boundDocs.forEach((state, docKey) => {
           this.runAwarenessAntiEntropyRound(state, docKey).catch(err => {
@@ -214,7 +214,7 @@ class YjsNatsCluster {
             console.error('cluster resync failed', docKey, err)
           })
         })
-      }, this.resyncIntervalMs)
+      }, this.resyncInterval)
     }
   }
 

@@ -237,7 +237,7 @@
  * nodeId: string,
  * bus?: ClusterBus,
  * nats?: ClusterNatsOptions,
- * resyncIntervalMs?: number,
+ * resyncInterval?: number,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null
  * }} CreateClusterSyncOptions
  */
@@ -267,7 +267,7 @@
  * bus: ClusterBus,
  * nodeId: string,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null,
- * resyncIntervalMs?: number
+ * resyncInterval?: number
  * }} YjsNatsClusterOptions
  */
 /**
