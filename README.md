@@ -172,6 +172,34 @@ Environment variables:
 - `NATS_NODE_ID`: optional node id (defaults to `host:port:pid`)
 - `NATS_RESYNC_INTERVAL`: periodic resync interval in ms (default `30000`)
 
+### Subjects and Methods
+
+Logical names used by cluster sync:
+
+- `doc.{namespace}-{docName}.update`
+- `doc.{namespace}-{docName}.awareness`
+- `doc.{namespace}-{docName}.anti-entropy`
+- `bus.awareness.anti-entropy` (shared by awareness anti-entropy solicit + shard payloads)
+
+Purpose of each logical name:
+
+- `doc.{namespace}-{docName}.update`: broadcasts Yjs document updates between nodes.
+- `doc.{namespace}-{docName}.awareness`: broadcasts real-time awareness deltas (presence/cursor/user state).
+- `doc.{namespace}-{docName}.anti-entropy`: unicast request/reply method for document anti-entropy catch-up (state-vector diff pull).
+- `bus.awareness.anti-entropy`: cluster-wide awareness anti-entropy bus; carries both solicitation signals and awareness shard payloads for reconciliation.
+
+Default NATS subjects (without `subjectTemplate`):
+
+- `broadcast.doc.{namespace}-{docName}.update`
+- `broadcast.doc.{namespace}-{docName}.awareness`
+- `unicast.doc.{nodeId}.{namespace}-{docName}.anti-entropy`
+- `broadcast.bus.awareness.anti-entropy`
+
+With `subjectTemplate` configured:
+
+- `broadcast` template maps `{topic}.{channel}.{event}` from logical names
+- `unicast` template maps `{nodeId}` + `{method}` where method is `doc.{namespace}-{docName}.anti-entropy`
+
 ### Host-managed membership (optional)
 
 ```js
@@ -182,7 +210,7 @@ const cluster = setupYdocCluster({
   nats: {
     connection: hostNatsConnection,
     subjectTemplate: {
-      broadcast: 'myapp.ydoc.broadcast.{topic}.{doc}.{event}',
+      broadcast: 'myapp.ydoc.broadcast.{topic}.{channel}.{event}',
       unicast: 'myapp.ydoc.unicast.{nodeId}.{method}'
     }
   },
@@ -198,7 +226,7 @@ hostCluster.onMembershipChanged(({ aliveNodeIds, leaderNodeId, removedNodeIds })
 
 Subject template validation:
 
-- `broadcast` must include `{topic}`, `{doc}`, `{event}`
+- `broadcast` must include `{topic}`, `{channel}`, `{event}`
 - `unicast` must include `{nodeId}`, `{method}`
 - unknown tokens are rejected
 

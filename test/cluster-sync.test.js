@@ -1,6 +1,8 @@
 import test from 'node:test'
 import * as Y from 'yjs'
 import { Awareness } from '@y/protocols/awareness'
+import * as awarenessProtocol from '@y/protocols/awareness'
+import * as encoding from 'lib0/encoding'
 import { YjsNatsCluster } from '../src/yjs-nats-cluster.js'
 
 /**
@@ -16,6 +18,21 @@ const waitFor = async (predicate, message, timeoutMs = 3000) => {
     }
     await new Promise(resolve => setTimeout(resolve, 10))
   }
+}
+
+/**
+ * @param {number} clientID
+ * @param {number} clock
+ * @param {any} state
+ * @returns {Uint8Array}
+ */
+const encodeSingleAwarenessUpdate = (clientID, clock, state) => {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, 1)
+  encoding.writeVarUint(encoder, clientID)
+  encoding.writeVarUint(encoder, clock)
+  encoding.writeVarString(encoder, JSON.stringify(state))
+  return encoding.toUint8Array(encoder)
 }
 
 class InMemoryBroker {
@@ -408,4 +425,141 @@ test('keeps peer online and restores awareness within 1s after local rebind', as
 
   await nodeA.cluster.close()
   await nodeB1.cluster.close()
+})
+
+test('broadcasts existing locally-controlled awareness to newly joined nodes', async () => {
+  const broker = new InMemoryBroker()
+  const nodeA = createClusterNode({ nodeId: 'node-a', broker })
+  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
+
+  const existingClientId = 9001
+  const connToken = {}
+  nodeA.doc.conns = new Map([[connToken, new Set([existingClientId])]])
+  awarenessProtocol.applyAwarenessUpdate(
+    nodeA.awareness,
+    encodeSingleAwarenessUpdate(existingClientId, 1, { user: 'client-1' }),
+    connToken
+  )
+
+  await nodeA.cluster.connect()
+  await nodeB.cluster.connect()
+  await nodeA.cluster.bindDoc('default', 'presence-doc', nodeA.doc, nodeA.awareness)
+  await nodeB.cluster.bindDoc('default', 'presence-doc', nodeB.doc, nodeB.awareness)
+
+  nodeA.cluster.setNodes('node-b', ['node-a', 'node-b'])
+  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+
+  await waitFor(
+    () => nodeB.awareness.getStates().has(existingClientId),
+    'Node B did not receive existing locally-controlled awareness from node A'
+  )
+
+  await nodeA.cluster.close()
+  await nodeB.cluster.close()
+})
+
+test('backfills existing awareness when remote doc binds after topology join', async () => {
+  const broker = new InMemoryBroker()
+  const nodeA = createClusterNode({ nodeId: 'node-a', broker })
+  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
+
+  await nodeA.cluster.connect()
+  await nodeB.cluster.connect()
+  await nodeA.cluster.bindDoc('default', 'presence-doc', nodeA.doc, nodeA.awareness)
+
+  nodeA.cluster.setNodes('node-b', ['node-a', 'node-b'])
+  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+
+  nodeA.awareness.setLocalStateField('user', 'alice')
+  await nodeB.cluster.bindDoc('default', 'presence-doc', nodeB.doc, nodeB.awareness)
+  nodeB.awareness.setLocalStateField('user', 'bob')
+
+  await waitFor(
+    () => nodeB.awareness.getStates().has(nodeA.doc.clientID),
+    'Node B did not receive node A awareness after late doc bind'
+  )
+
+  await nodeA.cluster.close()
+  await nodeB.cluster.close()
+})
+
+test('does not replay stale remote awareness after both peers go offline and local rebind', async () => {
+  const broker = new InMemoryBroker()
+  const nodeA1 = createClusterNode({ nodeId: 'node-a', broker })
+  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
+
+  await nodeA1.cluster.connect()
+  await nodeB.cluster.connect()
+  await nodeA1.cluster.bindDoc('default', 'presence-doc', nodeA1.doc, nodeA1.awareness)
+  await nodeB.cluster.bindDoc('default', 'presence-doc', nodeB.doc, nodeB.awareness)
+  nodeA1.cluster.setNodes('node-b', ['node-a', 'node-b'])
+  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+
+  nodeA1.awareness.setLocalStateField('user', 'alice')
+  nodeB.awareness.setLocalStateField('user', 'bob')
+  await waitFor(
+    () => nodeA1.awareness.getStates().has(nodeB.doc.clientID),
+    'Node A1 never received initial node B awareness'
+  )
+
+  await nodeA1.cluster.close()
+  await nodeB.cluster.close()
+
+  const nodeA2 = createClusterNode({ nodeId: 'node-a', broker })
+  await nodeA2.cluster.connect()
+  await nodeA2.cluster.bindDoc('default', 'presence-doc', nodeA2.doc, nodeA2.awareness)
+  nodeA2.cluster.setNodes(null, ['node-a'])
+  nodeA2.awareness.setLocalStateField('user', 'alice-rejoin')
+
+  await waitFor(
+    () => nodeA2.awareness.getStates().has(nodeA2.doc.clientID),
+    'Node A2 local awareness not present after rejoin'
+  )
+
+  if (nodeA2.awareness.getStates().has(nodeB.doc.clientID)) {
+    throw new Error('Node A2 should not replay stale node B awareness after both peers were offline')
+  }
+
+  await nodeA2.cluster.close()
+})
+
+test('keeps only local awareness after A up -> B up -> A down -> B down -> A up', async () => {
+  const broker = new InMemoryBroker()
+  const nodeA1 = createClusterNode({ nodeId: 'node-a', broker })
+  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
+
+  await nodeA1.cluster.connect()
+  await nodeB.cluster.connect()
+  await nodeA1.cluster.bindDoc('default', 'presence-doc', nodeA1.doc, nodeA1.awareness)
+  await nodeB.cluster.bindDoc('default', 'presence-doc', nodeB.doc, nodeB.awareness)
+  nodeA1.cluster.setNodes('node-b', ['node-a', 'node-b'])
+  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+
+  nodeA1.awareness.setLocalStateField('user', 'alice-1')
+  nodeB.awareness.setLocalStateField('user', 'bob-2')
+  await waitFor(
+    () => nodeA1.awareness.getStates().has(nodeB.doc.clientID),
+    'Node A1 did not observe node B before shutdown sequence'
+  )
+
+  await nodeA1.cluster.close()
+  await nodeB.cluster.close()
+
+  const nodeA2 = createClusterNode({ nodeId: 'node-a', broker })
+  await nodeA2.cluster.connect()
+  await nodeA2.cluster.bindDoc('default', 'presence-doc', nodeA2.doc, nodeA2.awareness)
+  nodeA2.cluster.setNodes(null, ['node-a'])
+  nodeA2.awareness.setLocalStateField('user', 'alice-rejoin')
+
+  await waitFor(
+    () => nodeA2.awareness.getStates().has(nodeA2.doc.clientID),
+    'Node A2 local awareness not present after rejoin'
+  )
+
+  if (nodeA2.awareness.getStates().size !== 1) {
+    const keys = Array.from(nodeA2.awareness.getStates().keys())
+    throw new Error(`Expected only local awareness on node A2, got clients: [${keys.join(',')}]`)
+  }
+
+  await nodeA2.cluster.close()
 })

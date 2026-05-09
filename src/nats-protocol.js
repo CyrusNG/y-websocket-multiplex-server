@@ -5,6 +5,8 @@ const MSG_UPDATE = 1
 const MSG_AWARENESS = 2
 const MSG_SYNC_REQUEST = 3
 const MSG_SYNC_RESPONSE = 4
+const MSG_AWARENESS_SNAPSHOT = 5
+const MSG_AWARENESS_SOLICIT = 6
 
 /**
  * Returns topic name for update fanout of one doc.
@@ -17,7 +19,15 @@ const getAwarenessTopic = docKey => `doc.${docKey}.awareness`
 /**
  * Returns RPC method subject for on-demand doc sync.
  */
-const getSyncMethod = docKey => `doc.${docKey}.sync`
+const getSyncMethod = docKey => `doc.${docKey}.anti-entropy`
+/**
+ * Returns topic name for cluster-global awareness snapshots.
+ */
+const getAwarenessSnapshotTopic = () => 'bus.awareness.anti-entropy'
+/**
+ * Returns topic name for cluster-global awareness snapshot solicitation.
+ */
+const getAwarenessSolicitTopic = () => 'bus.awareness.anti-entropy'
 
 /**
  * Encodes an array of numbers using varint entries.
@@ -87,6 +97,31 @@ const encodeSyncResponse = diffUpdate => {
 }
 
 /**
+ * Encodes a cluster-global awareness snapshot payload.
+ */
+const encodeAwarenessSnapshotMessage = (docKey, senderNodeId, awarenessUpdate, changedClients) => {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, MSG_AWARENESS_SNAPSHOT)
+  encoding.writeVarString(encoder, docKey)
+  encoding.writeVarString(encoder, senderNodeId)
+  encoding.writeVarUint8Array(encoder, awarenessUpdate)
+  writeNumberArray(encoder, changedClients)
+  return encoding.toUint8Array(encoder)
+}
+
+/**
+ * Encodes a cluster-global awareness snapshot solicitation payload.
+ */
+const encodeAwarenessSolicitMessage = (docKey, requesterNodeId, roundId) => {
+  const encoder = encoding.createEncoder()
+  encoding.writeVarUint(encoder, MSG_AWARENESS_SOLICIT)
+  encoding.writeVarString(encoder, docKey)
+  encoding.writeVarString(encoder, requesterNodeId)
+  encoding.writeVarString(encoder, roundId)
+  return encoding.toUint8Array(encoder)
+}
+
+/**
  * Decodes a transport payload and returns typed message data.
  */
 const decodeMessage = payload => {
@@ -130,6 +165,25 @@ const decodeMessage = payload => {
     }
   }
 
+  if (messageType === MSG_AWARENESS_SNAPSHOT) {
+    return {
+      messageType,
+      docKey: decoding.readVarString(decoder),
+      senderNodeId: decoding.readVarString(decoder),
+      awarenessUpdate: decoding.readVarUint8Array(decoder),
+      changedClients: readNumberArray(decoder)
+    }
+  }
+
+  if (messageType === MSG_AWARENESS_SOLICIT) {
+    return {
+      messageType,
+      docKey: decoding.readVarString(decoder),
+      requesterNodeId: decoding.readVarString(decoder),
+      roundId: decoding.readVarString(decoder)
+    }
+  }
+
   throw new Error(`Unsupported cluster message type: ${messageType}`)
 }
 
@@ -137,15 +191,21 @@ const MESSAGE_TYPE = {
   UPDATE: MSG_UPDATE,
   AWARENESS: MSG_AWARENESS,
   SYNC_REQUEST: MSG_SYNC_REQUEST,
-  SYNC_RESPONSE: MSG_SYNC_RESPONSE
+  SYNC_RESPONSE: MSG_SYNC_RESPONSE,
+  AWARENESS_SNAPSHOT: MSG_AWARENESS_SNAPSHOT,
+  AWARENESS_SOLICIT: MSG_AWARENESS_SOLICIT
 }
 
 export {
   getUpdateTopic,
   getAwarenessTopic,
   getSyncMethod,
+  getAwarenessSnapshotTopic,
+  getAwarenessSolicitTopic,
   encodeUpdateMessage,
   encodeAwarenessMessage,
+  encodeAwarenessSnapshotMessage,
+  encodeAwarenessSolicitMessage,
   encodeSyncRequest,
   encodeSyncResponse,
   decodeMessage,

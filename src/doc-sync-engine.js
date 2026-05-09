@@ -26,7 +26,8 @@ class DocSyncEngine {
     transport,
     remoteOrigin,
     isClusterOrigin,
-    onRemoteAwareness
+    onRemoteAwareness,
+    shouldAcceptRemoteNode = () => true
   }) {
     this.doc = doc
     this.awareness = awareness
@@ -34,6 +35,7 @@ class DocSyncEngine {
     this.nodeId = nodeId
     this.transport = transport
     this.onRemoteAwareness = onRemoteAwareness
+    this.shouldAcceptRemoteNode = shouldAcceptRemoteNode
 
     this.syncCore = createYDocSyncCore({
       doc,
@@ -76,6 +78,9 @@ class DocSyncEngine {
         if (senderNodeId === this.nodeId) {
           return
         }
+        if (!this.shouldAcceptRemoteNode(senderNodeId)) {
+          return
+        }
         this.syncCore.applyRemoteUpdate(update, {
           source: 'cluster',
           meta: {
@@ -93,11 +98,36 @@ class DocSyncEngine {
         if (senderNodeId === this.nodeId) {
           return
         }
+        if (!this.shouldAcceptRemoteNode(senderNodeId)) {
+          return
+        }
         this.syncCore.applyRemoteAwarenessUpdate(awarenessUpdate)
-        this.onRemoteAwareness(senderNodeId, changedClients)
+        this.onRemoteAwareness(senderNodeId, awarenessUpdate, changedClients)
       },
       onSyncRequest: (_requesterNodeId, stateVector) => this.syncCore.encodeStateAsUpdate(stateVector)
     })
+  }
+
+  /**
+   * Broadcasts awareness states for the specified client IDs.
+   *
+   * @param {Array<number>} changedClients
+   * @param {any} origin
+   * @returns {Promise<void>}
+   */
+  async broadcastAwarenessClients (changedClients, origin = { source: 'cluster-topology-sync' }) {
+    const uniqueClients = uniqueNumbers(changedClients).filter(clientId => this.awareness.getStates().has(clientId))
+    if (uniqueClients.length === 0) {
+      return
+    }
+    const awarenessUpdate = awarenessProtocol.encodeAwarenessUpdate(this.awareness, uniqueClients)
+    await this.transport.publishAwareness(
+      this.docKey,
+      this.nodeId,
+      awarenessUpdate,
+      uniqueClients,
+      origin
+    )
   }
 
   /**

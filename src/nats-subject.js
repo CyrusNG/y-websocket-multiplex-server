@@ -1,8 +1,6 @@
-const TOPIC_PARTS = new Set(['update', 'awareness'])
-
 /**
  * @typedef {import('./types.js').SubjectTemplate} SubjectTemplate
- * @typedef {import('./types.js').ParsedDocTopic} ParsedDocTopic
+ * @typedef {import('./types.js').ParsedBroadcastTopic} ParsedBroadcastTopic
  * @typedef {import('./types.js').CreateSubjectFormatterOptions} CreateSubjectFormatterOptions
  */
 
@@ -51,8 +49,8 @@ const validateSubjectTemplate = subjectTemplate => {
 
   validateTemplateTokens({
     template: broadcastTemplate,
-    allowed: new Set(['topic', 'doc', 'event']),
-    required: ['topic', 'doc', 'event'],
+    allowed: new Set(['topic', 'channel', 'event']),
+    required: ['topic', 'channel', 'event'],
     templateName: 'broadcast'
   })
   validateTemplateTokens({
@@ -79,34 +77,24 @@ const renderTemplate = (template, values) => template.replace(/\{([a-zA-Z0-9_]+)
 })
 
 /**
- * Parses a doc topic into namespace/doc/event segments.
+ * Parses a broadcast topic into topic/channel/event segments.
  *
  * @param {string} topic
- * @returns {ParsedDocTopic | null}
+ * @returns {ParsedBroadcastTopic | null}
  */
-const parseDocTopic = topic => {
-  if (!topic.startsWith('doc.')) {
-    return null
-  }
+const parseBroadcastTopic = topic => {
+  const firstDot = topic.indexOf('.')
   const lastDot = topic.lastIndexOf('.')
-  if (lastDot <= 4) {
+  if (firstDot <= 0 || lastDot <= firstDot + 1 || lastDot >= topic.length - 1) {
     return null
   }
+  const topicName = topic.slice(0, firstDot)
+  const channel = topic.slice(firstDot + 1, lastDot)
   const event = topic.slice(lastDot + 1)
-  if (!TOPIC_PARTS.has(event)) {
+  if (topicName.length === 0 || channel.length === 0 || event.length === 0) {
     return null
   }
-  const docKey = topic.slice(4, lastDot)
-  const keySep = docKey.indexOf(':')
-  if (keySep < 0) {
-    return null
-  }
-  const topicName = docKey.slice(0, keySep)
-  const docName = docKey.slice(keySep + 1)
-  if (topicName.length === 0 || docName.length === 0) {
-    return null
-  }
-  return { topic: topicName, doc: docName, event }
+  return { topic: topicName, channel, event }
 }
 
 /**
@@ -127,19 +115,19 @@ const createSubjectFormatter = ({ subjectTemplate }) => {
      */
     broadcastSubject (topic) {
       if (template === null) {
-        const parsed = parseDocTopic(topic)
+        const parsed = parseBroadcastTopic(topic)
         if (parsed === null) {
           return `broadcast.${topic}`
         }
-        return `broadcast.${parsed.topic}.${parsed.doc}.${parsed.event}`
+        return `broadcast.${parsed.topic}.${parsed.channel}.${parsed.event}`
       }
-      const parsed = parseDocTopic(topic)
+      const parsed = parseBroadcastTopic(topic)
       if (parsed === null) {
-        throw new Error(`subjectTemplate.broadcast only supports doc topics, received: ${topic}`)
+        throw new Error(`subjectTemplate.broadcast expects {topic}.{channel}.{event}, received: ${topic}`)
       }
       return renderTemplate(template.broadcast, {
         topic: parsed.topic,
-        doc: parsed.doc,
+        channel: parsed.channel,
         event: parsed.event
       })
     },
@@ -152,7 +140,10 @@ const createSubjectFormatter = ({ subjectTemplate }) => {
      */
     unicastSubject (nodeId, method) {
       if (template === null) {
-        return `unicast.${nodeId}.${method}`
+        const normalizedMethod = method.startsWith('doc.')
+          ? method.slice(4)
+          : method
+        return `unicast.doc.${nodeId}.${normalizedMethod}`
       }
       return renderTemplate(template.unicast, {
         nodeId,
@@ -162,4 +153,4 @@ const createSubjectFormatter = ({ subjectTemplate }) => {
   }
 }
 
-export { createSubjectFormatter, parseDocTopic, validateSubjectTemplate }
+export { createSubjectFormatter, parseBroadcastTopic, validateSubjectTemplate }

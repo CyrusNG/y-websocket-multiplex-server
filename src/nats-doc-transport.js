@@ -1,9 +1,13 @@
 import {
   decodeMessage,
   encodeAwarenessMessage,
+  encodeAwarenessSolicitMessage,
+  encodeAwarenessSnapshotMessage,
   encodeSyncRequest,
   encodeSyncResponse,
   encodeUpdateMessage,
+  getAwarenessSnapshotTopic,
+  getAwarenessSolicitTopic,
   getAwarenessTopic,
   getSyncMethod,
   getUpdateTopic,
@@ -23,6 +27,7 @@ class NatsDocTransport {
    */
   constructor ({ bus }) {
     this.bus = bus
+    this.debugAwareness = process.env.DEBUG_AWARENESS_CLUSTER === '1'
   }
 
   /**
@@ -36,7 +41,12 @@ class NatsDocTransport {
     const unsubs = []
 
     unsubs.push(await this.bus.subscribe(getUpdateTopic(docKey), payload => {
-      const parsed = decodeMessage(payload)
+      let parsed
+      try {
+        parsed = decodeMessage(payload)
+      } catch (_err) {
+        return
+      }
       if (parsed.messageType !== MESSAGE_TYPE.UPDATE) {
         return
       }
@@ -48,7 +58,12 @@ class NatsDocTransport {
     }))
 
     unsubs.push(await this.bus.subscribe(getAwarenessTopic(docKey), payload => {
-      const parsed = decodeMessage(payload)
+      let parsed
+      try {
+        parsed = decodeMessage(payload)
+      } catch (_err) {
+        return
+      }
       if (parsed.messageType !== MESSAGE_TYPE.AWARENESS) {
         return
       }
@@ -110,6 +125,96 @@ class NatsDocTransport {
       getAwarenessTopic(docKey),
       encodeAwarenessMessage(senderNodeId, awarenessUpdate, changedClients)
     )
+  }
+
+  /**
+   * Publishes a cluster-global awareness snapshot payload.
+   *
+   * @param {string} docKey
+   * @param {string} senderNodeId
+   * @param {Uint8Array} awarenessUpdate
+   * @param {Array<number>} changedClients
+   */
+  async publishAwarenessSnapshot (docKey, senderNodeId, awarenessUpdate, changedClients) {
+    if (this.debugAwareness) {
+      console.log('[aw-debug] publish snapshot', { docKey, senderNodeId, changedClients })
+    }
+    await this.bus.publish(
+      getAwarenessSnapshotTopic(),
+      encodeAwarenessSnapshotMessage(docKey, senderNodeId, awarenessUpdate, changedClients)
+    )
+  }
+
+  /**
+   * Subscribes to cluster-global awareness snapshots.
+   *
+   * @param {(docKey: string, senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void} handler
+   * @returns {Promise<() => void>}
+   */
+  async subscribeAwarenessSnapshots (handler) {
+    return this.bus.subscribe(getAwarenessSnapshotTopic(), payload => {
+      let parsed
+      try {
+        parsed = decodeMessage(payload)
+      } catch (_err) {
+        return
+      }
+      if (parsed.messageType !== MESSAGE_TYPE.AWARENESS_SNAPSHOT) {
+        return
+      }
+      if (this.debugAwareness) {
+        console.log('[aw-debug] recv snapshot', {
+          docKey: parsed.docKey,
+          senderNodeId: parsed.senderNodeId,
+          changedClients: parsed.changedClients
+        })
+      }
+      handler(
+        /** @type {string} */ (parsed.docKey),
+        /** @type {string} */ (parsed.senderNodeId),
+        /** @type {Uint8Array} */ (parsed.awarenessUpdate),
+        /** @type {Array<number>} */ (parsed.changedClients)
+      )
+    })
+  }
+
+  /**
+   * Publishes a cluster-global awareness snapshot solicitation.
+   *
+   * @param {string} docKey
+   * @param {string} requesterNodeId
+   * @param {string} roundId
+   */
+  async publishAwarenessSolicit (docKey, requesterNodeId, roundId) {
+    await this.bus.publish(
+      getAwarenessSolicitTopic(),
+      encodeAwarenessSolicitMessage(docKey, requesterNodeId, roundId)
+    )
+  }
+
+  /**
+   * Subscribes to cluster-global awareness snapshot solicitations.
+   *
+   * @param {(docKey: string, requesterNodeId: string, roundId: string) => void} handler
+   * @returns {Promise<() => void>}
+   */
+  async subscribeAwarenessSolicits (handler) {
+    return this.bus.subscribe(getAwarenessSolicitTopic(), payload => {
+      let parsed
+      try {
+        parsed = decodeMessage(payload)
+      } catch (_err) {
+        return
+      }
+      if (parsed.messageType !== MESSAGE_TYPE.AWARENESS_SOLICIT) {
+        return
+      }
+      handler(
+        /** @type {string} */ (parsed.docKey),
+        /** @type {string} */ (parsed.requesterNodeId),
+        /** @type {string} */ (parsed.roundId)
+      )
+    })
   }
 
   /**

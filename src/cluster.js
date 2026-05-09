@@ -16,6 +16,9 @@ import { setClusterSync } from './utils-docs.js'
  * @typedef {import('@y/protocols/awareness').Awareness} Awareness
  */
 
+/** @type {YDocClusterSyncAdapter | null} */
+let activeYdocCluster = null
+
 class NatsConnectionBus {
   /**
    * Wraps an existing NATS connection with the cluster bus interface.
@@ -199,7 +202,7 @@ class NatsConnectionBus {
 
 class YDocClusterSyncAdapter {
   /**
-   * Creates the runtime adapter that wires docs into NATS-backed cluster sync.
+   * Creates the runtime adapter that wires docs into host-bus-backed cluster sync.
    *
    * @param {CreateClusterSyncOptions} options
    */
@@ -333,8 +336,16 @@ class YDocClusterSyncAdapter {
  */
 const setupYdocCluster = options => {
   const clusterSync = new YDocClusterSyncAdapter(options)
+  activeYdocCluster = clusterSync
   setClusterSync(clusterSync)
   return clusterSync
 }
 
-export { setupYdocCluster, NatsBus }
+/**
+ * Returns the active cluster singleton set by setupYdocCluster, or null.
+ *
+ * @returns {YDocClusterSyncAdapter | null}
+ */
+const getYdocCluster = () => activeYdocCluster
+
+export { setupYdocCluster, getYdocCluster, NatsBus }

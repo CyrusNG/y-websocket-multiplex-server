@@ -105,7 +105,7 @@ const normalizeTransportOrigin = (docId, source) => ({
 /**
  * Builds a stable map key for one namespaced document.
  */
-const createDocKey = (namespace, docName) => `${namespace}:${docName}`
+const createDocKey = (namespace, docName) => `${namespace}-${docName}`
 
 /**
  * Derives namespace from request URL path.

@@ -15,9 +15,9 @@
 /**
  * @typedef {{
  * topic: string,
- * doc: string,
+ * channel: string,
  * event: string
- * }} ParsedDocTopic
+ * }} ParsedBroadcastTopic
  */
 /**
  * @typedef {{
@@ -109,6 +109,16 @@
  */
 /**
  * @typedef {{
+ * connect: () => Promise<void>,
+ * close: () => Promise<void>,
+ * publish: (topic: string, payload: Uint8Array) => Promise<void>,
+ * subscribe: (topic: string, handler: BusSubscribeHandler) => Promise<() => void>,
+ * request: (targetNodeId: string, method: string, payload: Uint8Array, opts?: BusRequestOptions) => Promise<Uint8Array>,
+ * handle: (method: string, handler: BusHandleHandler) => Promise<() => void>
+ * }} ClusterBus
+ */
+/**
+ * @typedef {{
  * nodeId: string,
  * connectOptions?: import('nats').ConnectionOptions,
  * subjectTemplate?: SubjectTemplate,
@@ -170,7 +180,7 @@
  */
 /**
  * @typedef {{
- * bus: import('./nats-bus.js').NatsBus
+ * bus: ClusterBus
  * }} NatsDocTransportOptions
  */
 /**
@@ -188,7 +198,8 @@
  * transport: DocSyncTransport,
  * remoteOrigin: any,
  * isClusterOrigin?: (origin: any) => boolean,
- * onRemoteAwareness: (senderNodeId: string, changedClients: Array<number>) => void
+ * onRemoteAwareness: (senderNodeId: string, awarenessUpdate: Uint8Array, changedClients: Array<number>) => void,
+ * shouldAcceptRemoteNode?: (senderNodeId: string) => boolean
  * }} DocSyncEngineOptions
  */
 
@@ -224,7 +235,7 @@
 /**
  * @typedef {{
  * nodeId: string,
- * bus?: any,
+ * bus?: ClusterBus,
  * nats?: ClusterNatsOptions,
  * resyncIntervalMs?: number,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null
@@ -253,7 +264,7 @@
  */
 /**
  * @typedef {{
- * bus: import('./nats-bus.js').NatsBus,
+ * bus: ClusterBus,
  * nodeId: string,
  * chooseSyncNode?: (docKey: string, aliveNodes: Array<string>, currentSyncNode: string | null) => string | null,
  * resyncIntervalMs?: number
