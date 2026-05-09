@@ -306,6 +306,224 @@ test('removes remote awareness when a cluster node is removed', async () => {
   await nodeB.cluster.close()
 })
 
+const runNodeLifecycleScenario = async ({ scenarioName, steps, finalExpectedA, finalExpectedB }) => {
+  const broker = new InMemoryBroker()
+  /** @type {{ nodeA: ReturnType<typeof createClusterNode> | null, nodeB: ReturnType<typeof createClusterNode> | null }} */
+  const state = { nodeA: null, nodeB: null }
+
+  const ensureTopology = () => {
+    if (state.nodeA && state.nodeB) {
+      state.nodeA.cluster.setNodes('node-b', ['node-a', 'node-b'])
+      state.nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+    } else if (state.nodeA) {
+      state.nodeA.cluster.setNodes(null, ['node-a'])
+    } else if (state.nodeB) {
+      state.nodeB.cluster.setNodes(null, ['node-b'])
+    }
+  }
+
+  const stepUpNodeA = async () => {
+    if (state.nodeA) return
+    state.nodeA = createClusterNode({ nodeId: 'node-a', broker })
+    await state.nodeA.cluster.connect()
+    await state.nodeA.cluster.bindDoc('default', 'presence-doc', state.nodeA.doc, state.nodeA.awareness)
+    state.nodeA.awareness.setLocalStateField('user', 'alice')
+    ensureTopology()
+  }
+  const stepUpNodeB = async () => {
+    if (state.nodeB) return
+    state.nodeB = createClusterNode({ nodeId: 'node-b', broker })
+    await state.nodeB.cluster.connect()
+    await state.nodeB.cluster.bindDoc('default', 'presence-doc', state.nodeB.doc, state.nodeB.awareness)
+    state.nodeB.awareness.setLocalStateField('user', 'bob')
+    ensureTopology()
+  }
+  const stepDownNodeA = async () => {
+    if (!state.nodeA) return
+    await state.nodeA.cluster.close()
+    state.nodeA = null
+    if (state.nodeB) {
+      state.nodeB.cluster.removeNode('node-a')
+    }
+    ensureTopology()
+  }
+  const stepDownNodeB = async () => {
+    if (!state.nodeB) return
+    await state.nodeB.cluster.close()
+    state.nodeB = null
+    if (state.nodeA) {
+      state.nodeA.cluster.removeNode('node-b')
+    }
+    ensureTopology()
+  }
+
+  try {
+    for (const step of steps) {
+      if (step === 'NODE_1_UP') await stepUpNodeA()
+      if (step === 'NODE_2_UP') await stepUpNodeB()
+      if (step === 'NODE_1_DOWN') await stepDownNodeA()
+      if (step === 'NODE_2_DOWN') await stepDownNodeB()
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+
+    if (state.nodeA) {
+      await waitFor(
+        () => {
+          const hasSelf = state.nodeA && state.nodeA.awareness.getStates().has(state.nodeA.doc.clientID)
+          const hasPeer = state.nodeA && state.nodeB && state.nodeA.awareness.getStates().has(state.nodeB.doc.clientID)
+          return finalExpectedA === 'A_ONLY' ? hasSelf && !hasPeer : hasSelf && hasPeer
+        },
+        `Scenario "${scenarioName}": node-1 final awareness mismatch`
+      )
+    }
+    if (state.nodeB) {
+      await waitFor(
+        () => {
+          const hasSelf = state.nodeB && state.nodeB.awareness.getStates().has(state.nodeB.doc.clientID)
+          const hasPeer = state.nodeB && state.nodeA && state.nodeB.awareness.getStates().has(state.nodeA.doc.clientID)
+          return finalExpectedB === 'B_ONLY' ? hasSelf && !hasPeer : hasSelf && hasPeer
+        },
+        `Scenario "${scenarioName}": node-2 final awareness mismatch`
+      )
+    }
+  } finally {
+    if (state.nodeA) await state.nodeA.cluster.close()
+    if (state.nodeB) await state.nodeB.cluster.close()
+  }
+}
+
+const nodeLifecycleScenarios = [
+  {
+    name: 'node-1 up -> node-2 up',
+    steps: ['NODE_1_UP', 'NODE_2_UP'],
+    finalExpectedA: 'A_AND_B',
+    finalExpectedB: 'A_AND_B'
+  },
+  {
+    name: 'node-1 up -> node-2 up -> node-2 down -> node-2 up',
+    steps: ['NODE_1_UP', 'NODE_2_UP', 'NODE_2_DOWN', 'NODE_2_UP'],
+    finalExpectedA: 'A_AND_B',
+    finalExpectedB: 'A_AND_B'
+  },
+  {
+    name: 'node-1 up -> node-2 up -> node-1 down -> node-2 down -> node-2 up -> node-1 up',
+    steps: ['NODE_1_UP', 'NODE_2_UP', 'NODE_1_DOWN', 'NODE_2_DOWN', 'NODE_2_UP', 'NODE_1_UP'],
+    finalExpectedA: 'A_AND_B',
+    finalExpectedB: 'A_AND_B'
+  }
+]
+
+nodeLifecycleScenarios.forEach(scenario => {
+  test(`node lifecycle scenario: ${scenario.name}`, async () => {
+    await runNodeLifecycleScenario(scenario)
+  })
+})
+
+const same = (actual, expected) => actual.length === expected.length && expected.every(x => actual.includes(x))
+
+const runClientAwarenessScenario = async ({ scenarioName, steps, expectedA, expectedB }) => {
+  const broker = new InMemoryBroker()
+  /** @type {{ A: ReturnType<typeof createClusterNode> | null, B: ReturnType<typeof createClusterNode> | null }} */
+  const activeNodes = { A: null, B: null }
+  /** @type {Map<'A'|'B', number | null>} */
+  const knownClientIds = new Map([['A', null], ['B', null]])
+
+  const refreshTopology = () => {
+    const nodeA = activeNodes.A
+    const nodeB = activeNodes.B
+    if (nodeA && nodeB) {
+      nodeA.cluster.setNodes('node-b', ['node-a', 'node-b'])
+      nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
+    } else if (nodeA) {
+      nodeA.cluster.setNodes(null, ['node-a'])
+    } else if (nodeB) {
+      nodeB.cluster.setNodes(null, ['node-b'])
+    }
+  }
+
+  const getLabels = viewer => {
+    const current = activeNodes[viewer]
+    if (!current) {
+      return []
+    }
+    const states = current.awareness.getStates()
+    return /** @type {Array<'A'|'B'>} */ (['A', 'B'].filter(label => {
+      const id = knownClientIds.get(label)
+      return typeof id === 'number' && states.has(id)
+    }))
+  }
+
+  const up = async label => {
+    if (activeNodes[label]) return
+    const node = createClusterNode({
+      nodeId: label === 'A' ? 'node-a' : 'node-b',
+      broker,
+      clientID: knownClientIds.get(label) ?? undefined
+    })
+    await node.cluster.connect()
+    await node.cluster.bindDoc('default', 'presence-doc', node.doc, node.awareness)
+    node.awareness.setLocalStateField('user', label === 'A' ? 'alice' : 'bob')
+    knownClientIds.set(label, node.doc.clientID)
+    activeNodes[label] = node
+    refreshTopology()
+  }
+
+  const down = async label => {
+    const node = activeNodes[label]
+    if (!node) return
+    await node.cluster.close()
+    activeNodes[label] = null
+    const peerLabel = label === 'A' ? 'B' : 'A'
+    if (activeNodes[peerLabel]) {
+      activeNodes[peerLabel].cluster.removeNode(label === 'A' ? 'node-a' : 'node-b')
+    }
+    refreshTopology()
+  }
+
+  try {
+    await up('A')
+    await up('B')
+
+    await waitFor(
+      () => same(getLabels('A'), ['A', 'B']) && same(getLabels('B'), ['A', 'B']),
+      `Scenario "${scenarioName}": initial awareness did not converge`
+    )
+
+    for (const step of steps) {
+      if (step === 'A_DOWN') await down('A')
+      if (step === 'A_UP') await up('A')
+      if (step === 'B_DOWN') await down('B')
+      if (step === 'B_UP') await up('B')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+
+    await waitFor(
+      () => same(getLabels('A'), expectedA) && same(getLabels('B'), expectedB),
+      `Scenario "${scenarioName}": final awareness mismatch`
+    )
+  } finally {
+    if (activeNodes.A) await activeNodes.A.cluster.close()
+    if (activeNodes.B) await activeNodes.B.cluster.close()
+  }
+}
+
+const clientAwarenessScenarioCases = [
+  { name: 'client-A@node-a up -> client-B@node-b up', steps: [], expectedA: ['A', 'B'], expectedB: ['A', 'B'] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-A@node-a down', steps: ['A_DOWN'], expectedA: [], expectedB: ['B'] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-B@node-b down', steps: ['B_DOWN'], expectedA: ['A'], expectedB: [] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-A@node-a down -> client-B@node-b down', steps: ['A_DOWN', 'B_DOWN'], expectedA: [], expectedB: [] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-A@node-a down -> client-A@node-a up', steps: ['A_DOWN', 'A_UP'], expectedA: ['A', 'B'], expectedB: ['A', 'B'] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-B@node-b down -> client-B@node-b up', steps: ['B_DOWN', 'B_UP'], expectedA: ['A', 'B'], expectedB: ['A', 'B'] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-A@node-a down -> client-B@node-b down -> client-A@node-a up', steps: ['A_DOWN', 'B_DOWN', 'A_UP'], expectedA: ['A'], expectedB: [] },
+  { name: 'client-A@node-a up -> client-B@node-b up -> client-A@node-a down -> client-B@node-b down -> client-B@node-b up', steps: ['A_DOWN', 'B_DOWN', 'B_UP'], expectedA: [], expectedB: ['B'] }
+]
+
+clientAwarenessScenarioCases.forEach(({ name, ...scenario }) => {
+  test(`client awareness scenario: ${name}`, async () => {
+    await runClientAwarenessScenario({ scenarioName: name, ...scenario })
+  })
+})
+
 test('restores awareness immediately when a removed cluster node rejoins with same client id', async () => {
   const broker = new InMemoryBroker()
   const nodeA1 = createClusterNode({ nodeId: 'node-a', broker })
@@ -518,47 +736,6 @@ test('does not replay stale remote awareness after both peers go offline and loc
 
   if (nodeA2.awareness.getStates().has(nodeB.doc.clientID)) {
     throw new Error('Node A2 should not replay stale node B awareness after both peers were offline')
-  }
-
-  await nodeA2.cluster.close()
-})
-
-test('keeps only local awareness after A up -> B up -> A down -> B down -> A up', async () => {
-  const broker = new InMemoryBroker()
-  const nodeA1 = createClusterNode({ nodeId: 'node-a', broker })
-  const nodeB = createClusterNode({ nodeId: 'node-b', broker })
-
-  await nodeA1.cluster.connect()
-  await nodeB.cluster.connect()
-  await nodeA1.cluster.bindDoc('default', 'presence-doc', nodeA1.doc, nodeA1.awareness)
-  await nodeB.cluster.bindDoc('default', 'presence-doc', nodeB.doc, nodeB.awareness)
-  nodeA1.cluster.setNodes('node-b', ['node-a', 'node-b'])
-  nodeB.cluster.setNodes('node-a', ['node-a', 'node-b'])
-
-  nodeA1.awareness.setLocalStateField('user', 'alice-1')
-  nodeB.awareness.setLocalStateField('user', 'bob-2')
-  await waitFor(
-    () => nodeA1.awareness.getStates().has(nodeB.doc.clientID),
-    'Node A1 did not observe node B before shutdown sequence'
-  )
-
-  await nodeA1.cluster.close()
-  await nodeB.cluster.close()
-
-  const nodeA2 = createClusterNode({ nodeId: 'node-a', broker })
-  await nodeA2.cluster.connect()
-  await nodeA2.cluster.bindDoc('default', 'presence-doc', nodeA2.doc, nodeA2.awareness)
-  nodeA2.cluster.setNodes(null, ['node-a'])
-  nodeA2.awareness.setLocalStateField('user', 'alice-rejoin')
-
-  await waitFor(
-    () => nodeA2.awareness.getStates().has(nodeA2.doc.clientID),
-    'Node A2 local awareness not present after rejoin'
-  )
-
-  if (nodeA2.awareness.getStates().size !== 1) {
-    const keys = Array.from(nodeA2.awareness.getStates().keys())
-    throw new Error(`Expected only local awareness on node A2, got clients: [${keys.join(',')}]`)
   }
 
   await nodeA2.cluster.close()
